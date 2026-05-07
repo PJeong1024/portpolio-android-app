@@ -9,12 +9,16 @@ import com.jdw.skillstestapp.data.model.UserImg
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class GoogleMapsRepository @Inject constructor(
     private val contentResolver: ContentResolver,
     private val userImgDao: UserImgDao,
 ) {
-    private val TAG = "GoogleMapsRepository"
+    companion object {
+        private const val TAG = "GoogleMapsRepository"
+    }
 
     suspend fun fetchImages() {
         val projection = arrayOf(
@@ -44,7 +48,8 @@ class GoogleMapsRepository @Inject constructor(
                 val imagePath = it.getString(dataColumn)
                 val displayName = it.getString(displayNameColumn)
 
-                if (!displayName.contains(".jpg")) {
+                val lowerName = displayName.lowercase()
+                if (!lowerName.endsWith(".jpg") && !lowerName.endsWith(".jpeg")) {
                     Log.d(TAG, "not a JPEG image format : $displayName")
                     continue
                 }
@@ -55,7 +60,7 @@ class GoogleMapsRepository @Inject constructor(
                     continue
                 }
 
-                if (userImgDao.getImage(imageID.toString()) == null) {
+                if (userImgDao.getImage(imageID) == null) {
                     userImgDao.insertImage(
                         UserImg(
                             imageID = imageID,
@@ -74,11 +79,12 @@ class GoogleMapsRepository @Inject constructor(
         }
     }
 
-    suspend fun getAllImages(): List<UserImg> = userImgDao.getAllImages()
-
-    suspend fun deleteUserImage(userImg: UserImg) = userImgDao.deleteImage(userImg)
-
-    fun imageIsExist(filePath: String): Boolean = File(filePath).exists()
+    suspend fun syncAndGetImages(): List<UserImg> {
+        val images = userImgDao.getAllImages()
+        val (existing, deleted) = images.partition { File(it.imageDataPath).exists() }
+        deleted.forEach { userImgDao.deleteImage(it) }
+        return existing.sortedByDescending { it.imageDateTaken }
+    }
 
     private fun readExifData(imagePath: String): Pair<Double, Double>? {
         return try {

@@ -1,6 +1,6 @@
 # Android 앱 명세 (Google Maps 마커 송신)
 
-> 최종 업데이트: 2026-04-21  
+> 최종 업데이트: 2026-05-07  
 > 원본 프로젝트: GoogleMap 기반 Android ↔ macOS 크로스 플랫폼 연동
 
 ---
@@ -257,3 +257,77 @@ jobs:
 - **Dead code 제거**
   - `FireBaseAuthViewModel`: 사용하지 않던 `MyAppRepository` 주입 제거
   - `PhotoBroadcastReceiver`: 전체 주석 처리된 코드 제거 (빈 `onReceive`만 유지)
+
+---
+
+### 2026-05-07 — 전체 코드베이스 리팩토링 Round 2 (Claude Code)
+
+#### 버그 수정
+
+- **`GeminiChatRoomViewModel.init` 레이스 컨디션 수정** (`GeminiChatRoomViewModel.kt`)
+  - `getAllMessage()` 코루틴이 끝나기 전에 `isEmpty()` 체크 → 항상 true → 매 실행마다 인사 메시지 중복 삽입되던 문제 수정
+  - `init`을 단일 코루틴으로 통합: DB 조회 후 비어 있을 때만 첫 메시지 삽입
+
+- **`BottomBarImageListView` 클릭 핸들러 수정** (`GoogleMapsScreen.kt`)
+  - 클러스터 목록에서 사진 탭해도 아무 동작 없던 버그 수정
+  - 콜백 타입 `(String) -> Unit` → `(UserImg) -> Unit`으로 변경
+  - 클릭 시 `selectedClusterItem` 갱신 후 `ImageItemState`로 상태 전환
+
+- **`UserImgDao.getImage()` 타입 불일치 수정** (`UserImgDao.kt`)
+  - 파라미터 `String` → `Int` 로 변경 (컬럼 타입과 일치)
+
+- **`_isLoading` 초기값 수정** (`GeminiChatRoomViewModel.kt`)
+  - `MutableStateFlow(true)` → `MutableStateFlow(false)`: 앱 진입 시 불필요한 로딩 스피너 제거
+
+#### 아키텍처 개선
+
+- **`UserImg` 엔티티에서 `ClusterItem` 분리** (`data/model/UserImg.kt`, `map/UserImgClusterItem.kt`)
+  - DB 엔티티가 Google Maps SDK 인터페이스를 직접 구현하던 의존성 제거
+  - `UserImgClusterItem(val source: UserImg) : ClusterItem` 래퍼 클래스 신규 생성
+  - `GoogleMapsScreen`에서 `remember(imgList) { imgList.map { UserImgClusterItem(it) } }` 로 변환
+
+- **파일 존재 동기화 로직 Repository로 이동** (`GoogleMapsRepository.kt`, `GoogleMapScreenViewModel.kt`)
+  - ViewModel에 있던 `imageIsExist` + `deleteUserImage` 분기 로직 → `syncAndGetImages()` 메서드로 Repository에 캡슐화
+  - ViewModel은 `syncAndGetImages()` 호출만 담당하도록 단순화
+
+- **`MyAppRepository` → `ChatRepository` + `WeatherRepository` 분리** (`repository/`)
+  - Gemini 채팅과 날씨 API라는 무관한 두 도메인을 분리
+  - `ChatRepository`, `WeatherRepository` 신규 생성 (`@Singleton @Inject constructor`)
+  - `MyAppRepository.kt` 삭제
+  - `GeminiChatRoomViewModel`, `WeatherApiViewModel` 각각의 Repository 주입으로 변경
+
+- **`GoogleMapsRepository` `@Singleton` 명시 및 DI 개선** (`GoogleMapsRepository.kt`, `AppModule.kt`)
+  - 클래스에 `@Singleton` 추가 → `AppModule`의 중복 `@Provides` 제거
+  - `ChatRepository`, `WeatherRepository`도 `@Inject constructor` 방식으로 Hilt 자동 제공
+
+#### 코드 품질 개선
+
+- **JPEG 필터 대소문자 처리** (`GoogleMapsRepository.kt`)
+  - `!displayName.contains(".jpg")` → `lowercase().endsWith(".jpg") || .endsWith(".jpeg")` 로 변경
+  - `.JPG`, `.JPEG` 확장자 누락 방지
+
+- **`TAG` companion object 이동** (`GoogleMapsRepository.kt`)
+  - 인스턴스 변수 `private val TAG` → `companion object { private const val TAG }`
+
+- **`UserImg` 필드 `var` → `val` 불변 처리** (`UserImg.kt`)
+  - 엔티티 데이터 변경 불가로 안전성 향상
+  - `imageLat`, `imageLong` 기본값 `0.0` → `null` (0.0은 실제 좌표값이므로 null이 의미론적으로 정확)
+
+- **`WeatherContent` 내부 Scaffold 제거** (`WeatherApiScreen.kt`)
+  - bottom bar 없는 화면에서 불필요한 중첩 Scaffold 제거 → 단순 Column 구조로 변경
+  - `FBottomBarState`, `bottomBarVisible`, `bottomBarState` dead state 제거
+  - 함수명 `MainScreen` → `WeatherContent` (같은 패키지 내 네이밍 충돌 해소)
+
+- **`isLoading` StateFlow 일관성** (`GeminiChatRoomViewModel.kt`)
+  - `val isLoading: StateFlow<Boolean> = _isLoading` → `.asStateFlow()` 명시
+
+#### Dead code 정리
+
+| 파일 | 제거 항목 |
+|------|----------|
+| `AppModule.kt` | 주석 처리된 Firebase Book, BooksApi 코드 블록 |
+| `Utils.kt` | 주석 처리된 `IngredientListConverter`, 미사용 `StringListConverter` |
+| `Utils.kt` | 미사용 `formatDate()`, `formatDecimals()` |
+| `Constants.kt` | 미사용 `NetworkConnectionTypes` 리스트 |
+| `UserImgDao.kt` | 미사용 `deleteByImageID()` |
+| `repository/MyAppRepository.kt` | 파일 전체 삭제 |
