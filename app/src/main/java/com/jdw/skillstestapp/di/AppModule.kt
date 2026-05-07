@@ -12,6 +12,7 @@ import com.jdw.skillstestapp.data.AppDatabase
 import com.jdw.skillstestapp.data.ChatMessageDao
 import com.jdw.skillstestapp.data.UserImgDao
 import com.jdw.skillstestapp.data.network.WeatherApi
+import com.jdw.skillstestapp.repository.GoogleMapsRepository
 import com.jdw.skillstestapp.repository.MyAppRepository
 import com.jdw.skillstestapp.utils.Constants
 import dagger.Module
@@ -35,13 +36,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideMyAppRepository(
-        contentResolver: ContentResolver,   // Inject ContentResolver here
+    fun provideGoogleMapsRepository(
+        contentResolver: ContentResolver,
         userImgDao: UserImgDao,
+    ): GoogleMapsRepository {
+        return GoogleMapsRepository(contentResolver, userImgDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMyAppRepository(
         chatMessageDao: ChatMessageDao,
-        weatherApi: WeatherApi
+        weatherApi: WeatherApi,
     ): MyAppRepository {
-        return MyAppRepository(contentResolver, userImgDao, chatMessageDao, weatherApi)
+        return MyAppRepository(chatMessageDao, weatherApi)
     }
 
     @Provides

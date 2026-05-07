@@ -3,7 +3,7 @@ package com.jdw.skillstestapp.screens.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jdw.skillstestapp.data.model.UserImg
-import com.jdw.skillstestapp.repository.MyAppRepository
+import com.jdw.skillstestapp.repository.GoogleMapsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,7 +14,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class GoogleMapScreenViewModel @Inject constructor(
-    private val appRepository: MyAppRepository,
+    private val mapsRepository: GoogleMapsRepository,
 ) : ViewModel() {
 
     private val _userImages: MutableStateFlow<List<UserImg>> = MutableStateFlow(emptyList())
@@ -25,26 +25,19 @@ class GoogleMapScreenViewModel @Inject constructor(
         fetchImagesToDb()
     }
 
-    // for image
     fun fetchImagesToDb() {
         viewModelScope.launch(Dispatchers.IO) {
-            appRepository.fetchImages()
+            mapsRepository.fetchImages()
             getAllImages()
         }
     }
 
     fun getAllImages() {
         viewModelScope.launch(Dispatchers.IO) {
-            appRepository.getAllImages().forEach { userImage ->
-                if (!appRepository.imageIsExist(userImage.imageDataPath)) {
-                    appRepository.deleteUserImage(userImage)
-                }
-            }
-
-            _userImages.value =
-                appRepository.getAllImages().sortedByDescending { userImg ->
-                    userImg.imageDateTaken
-                }
+            val images = mapsRepository.getAllImages()
+            val existing = images.filter { mapsRepository.imageIsExist(it.imageDataPath) }
+            (images - existing.toSet()).forEach { mapsRepository.deleteUserImage(it) }
+            _userImages.value = existing.sortedByDescending { it.imageDateTaken }
         }
     }
 }

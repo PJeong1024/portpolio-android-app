@@ -218,3 +218,42 @@ jobs:
 > Android ↔ macOS 간 커스텀 바이너리 패킷 프로토콜 설계 및 구현
 
 > Google Maps SDK를 활용한 GPS 메타데이터 파싱 및 마커 + 썸네일 표시 구현
+
+
+## 13. 작업 히스토리
+
+### 2026-05-07 — 코드 구조 진단 및 리팩토링 (Claude Code)
+
+#### 긴급 수정 (crash / 초기화 문제)
+
+- **`!!` 강제 언박싱 제거** (`GoogleMapsScreen.kt`)
+  - `imageLat!!` / `imageLong!!` → `?: 37.461400` / `?: 126.452702` fallback 처리
+  - GPS 없는 사진이 첫 번째로 오면 crash 나던 문제 해결
+
+- **`fetchImagesToDb()` 호출 위치 이동** (`GoogleMapScreenViewModel.kt`)
+  - `onMapLoaded` UI 콜백 → ViewModel `init`으로 이동
+  - `getAllImages()`(DB 캐시 즉시 표시) + `fetchImagesToDb()`(갤러리 스캔 후 갱신) 순서로 init 구성
+
+- **기본 탭 변경** (`MainScreen.kt`)
+  - `WeatherApiScreen` → `GoogleMaps`로 변경 (포트폴리오 핵심 기능 우선 표시)
+
+#### Phase 1 정리 — Repository 분리 및 Dead code 제거
+
+- **`GoogleMapsRepository` 신규 생성** (`repository/GoogleMapsRepository.kt`)
+  - `MyAppRepository`에서 지도 관련 로직 분리: `fetchImages`, `getAllImages`, `deleteUserImage`, `imageIsExist`, `readExifData`
+  - `GoogleMapScreenViewModel`이 `MyAppRepository` 대신 `GoogleMapsRepository`를 주입받도록 변경
+
+- **`MyAppRepository` 슬림화** (`repository/MyAppRepository.kt`)
+  - Gemini Chat(`getAllMessage`, `insertMessage`, `deleteMessage`) + Weather API(`getWeather`)만 잔류
+  - `ContentResolver`, `UserImgDao` 의존성 제거
+
+- **`AppModule` 업데이트** (`di/AppModule.kt`)
+  - `provideGoogleMapsRepository` 추가
+  - `provideMyAppRepository` 파라미터에서 `ContentResolver`, `UserImgDao` 제거
+
+- **DB 쿼리 중복 제거** (`GoogleMapScreenViewModel.kt`)
+  - `getAllImages()` 두 번 호출하던 구조 → 한 번 쿼리 후 `existing` / `deleted` 분기 처리
+
+- **Dead code 제거**
+  - `FireBaseAuthViewModel`: 사용하지 않던 `MyAppRepository` 주입 제거
+  - `PhotoBroadcastReceiver`: 전체 주석 처리된 코드 제거 (빈 `onReceive`만 유지)
