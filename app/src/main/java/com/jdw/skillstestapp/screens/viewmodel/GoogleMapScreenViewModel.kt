@@ -21,10 +21,12 @@ class GoogleMapScreenViewModel @Inject constructor(
     val userImages: StateFlow<List<UserImg>> = _userImages.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            mapsRepository.getAllImages().collect { _userImages.value = it }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            _userImages.value = mapsRepository.syncAndGetImages()
+            mapsRepository.syncDeletedImages()
             mapsRepository.fetchImages()
-            _userImages.value = mapsRepository.syncAndGetImages()
         }
     }
 }

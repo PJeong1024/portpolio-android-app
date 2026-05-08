@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -87,7 +91,13 @@ fun DisplayGoogleMap(viewModel: GoogleMapScreenViewModel) {
                 }
 
                 BottomBarState.ImageItemState -> {
-                    BottomBarImageContent(clusterItem = selectedClusterItem)
+                    BottomBarImageContent(
+                        clusterItem = selectedClusterItem,
+                        onBack = {
+                            bottomBarState = if (selectedCluster.size > 1) BottomBarState.ImageListState
+                                             else BottomBarState.EmptyState
+                        }
+                    )
                 }
             }
         }) { innerPadding ->
@@ -135,14 +145,22 @@ fun DisplayGoogleMap(viewModel: GoogleMapScreenViewModel) {
 }
 
 @Composable
-fun BottomBarImageContent(clusterItem: UserImg) {
+fun BottomBarImageContent(clusterItem: UserImg, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .padding(10.dp)
             .fillMaxWidth()
             .heightIn(max = 250.dp)
     ) {
-        Text(text = clusterItem.imageDisplayName)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "back"
+                )
+            }
+            Text(text = clusterItem.imageDisplayName)
+        }
         Spacer(modifier = Modifier.padding(5.dp))
         Image(
             painter = rememberAsyncImagePainter(model = clusterItem.imageDataPath),

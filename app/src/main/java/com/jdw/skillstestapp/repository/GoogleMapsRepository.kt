@@ -6,6 +6,8 @@ import android.provider.MediaStore
 import android.util.Log
 import com.jdw.skillstestapp.data.UserImgDao
 import com.jdw.skillstestapp.data.model.UserImg
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
@@ -20,7 +22,17 @@ class GoogleMapsRepository @Inject constructor(
         private const val TAG = "GoogleMapsRepository"
     }
 
+    fun getAllImages(): Flow<List<UserImg>> = userImgDao.getAllImages()
+
+    suspend fun syncDeletedImages() {
+        val images = userImgDao.getAllImages().first()
+        val deleted = images.filter { !File(it.imageDataPath).exists() }
+        deleted.forEach { userImgDao.deleteImage(it) }
+    }
+
     suspend fun fetchImages() {
+        val existingIds = userImgDao.getAllImageIds().toSet()
+
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATA,
@@ -45,45 +57,37 @@ class GoogleMapsRepository @Inject constructor(
 
             while (it.moveToNext()) {
                 val imageID = it.getInt(idColumn)
-                val imagePath = it.getString(dataColumn)
-                val displayName = it.getString(displayNameColumn)
+                if (imageID in existingIds) continue
 
+                val displayName = it.getString(displayNameColumn)
                 val lowerName = displayName.lowercase()
                 if (!lowerName.endsWith(".jpg") && !lowerName.endsWith(".jpeg")) {
                     Log.d(TAG, "not a JPEG image format : $displayName")
                     continue
                 }
 
+                val imagePath = it.getString(dataColumn)
                 val exifData = readExifData(imagePath)
                 if (exifData == null) {
                     Log.d(TAG, "image doesn't have GPS data : $displayName")
                     continue
                 }
 
-                if (userImgDao.getImage(imageID) == null) {
-                    userImgDao.insertImage(
-                        UserImg(
-                            imageID = imageID,
-                            imageDataPath = imagePath,
-                            imageDisplayName = displayName,
-                            imageLat = exifData.first,
-                            imageLong = exifData.second,
-                            imageDateTaken = it.getLong(dateTakenColumn),
-                            imageOri = it.getInt(orientationColumn),
-                            imageSize = it.getLong(sizeColumn),
-                            imageAddress = ""
-                        )
+                userImgDao.insertImage(
+                    UserImg(
+                        imageID = imageID,
+                        imageDataPath = imagePath,
+                        imageDisplayName = displayName,
+                        imageLat = exifData.first,
+                        imageLong = exifData.second,
+                        imageDateTaken = it.getLong(dateTakenColumn),
+                        imageOri = it.getInt(orientationColumn),
+                        imageSize = it.getLong(sizeColumn),
+                        imageAddress = ""
                     )
-                }
+                )
             }
         }
-    }
-
-    suspend fun syncAndGetImages(): List<UserImg> {
-        val images = userImgDao.getAllImages()
-        val (existing, deleted) = images.partition { File(it.imageDataPath).exists() }
-        deleted.forEach { userImgDao.deleteImage(it) }
-        return existing.sortedByDescending { it.imageDateTaken }
     }
 
     private fun readExifData(imagePath: String): Pair<Double, Double>? {
