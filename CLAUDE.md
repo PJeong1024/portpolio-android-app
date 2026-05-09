@@ -5,6 +5,11 @@
 
 ---
 
+## 작업간 주요 공지사항
+- 작업 범위는 /android-app 디렉토리 내 Android 앱 개발로 한정
+- 필요시, 다른 폴더의 md 파일 참조가 가능하지만, md 파일 수정은 불가함
+- 작업간 모든 내역은 히스토리 섹션에 기록하여 향후 작업간 참조
+
 ## 1. 앱 개요
 
 갤러리 사진의 GPS 메타데이터를 파싱하여 Google Maps 위에 마커를 표시하고,  
@@ -119,46 +124,72 @@ class TcpTransport(
 
 ## 7. 송신 패킷 프로토콜
 
+## 6. 패킷 프로토콜 (초안)
+
+
+### 전송간 동작(Android App <-> Electron App)
+
+1. Android 앱에서의 기존 동작
+- 폰에 있는 사진들에서 GPS 정보를 꺼내서 googlemap에서 마커/마커 클러스터 방식으로 표시
+- 단독 마커를 클릭하면 이미지를 보여주고, 클러스터를 클릭하면 이미지 리스트를 보여줌
+- 이미지 리스트에서 이미지를 선택하면 앞의 단독 마커 클릭처럼 이미지를 보여줌
+
+2. Electron 앱과의 연계동작(구현 목표)
+- 안드로이드 앱에서 마커나 클러스터를 클릭하면 마커 리스트 정보를 전송
+  - 전송 데이터는 imageID + imageDisplayName + imageLat + imageLong 포함
+  - 자세한 내용은 image data class 참조
+- Electron 앱에서는 해당 데이터로 마커/클러스터 표시
+- 사용자가 Electron 앱에서 해당 표시된 마커 혹은 클러스터 클릭시 Electron 앱에서는 아래와 같이 표시
+  - 마커 클릭시는 이미지 1개 표시하면서 안드로이드 앱에 imageID 기반으로 이미지 데이터 전송 요청(원본). 전송되는대로 async 이미지 로딩 진행
+  - 클러스터 클릭시는 해당 클러스터에 포함된 이미지 이름 리스트 표시(imageDataPath). 사용자가 리스트에서 이미지를 선택하면 해당 이미지 데이터 전송 요청(원본). 전송되는대로 async 이미지 로딩 진행
+
+### image data sample
+```kotlin
+@Entity(tableName = "user_images")
+data class UserImg(
+    @PrimaryKey @ColumnInfo(name = "image_id") val imageID: Int = 0,
+    @ColumnInfo(name = "image_data_path") val imageDataPath: String = "",
+    @ColumnInfo(name = "image_display_name") val imageDisplayName: String = "",
+    @ColumnInfo(name = "image_lat") val imageLat: Double? = null,
+    @ColumnInfo(name = "image_long") val imageLong: Double? = null,
+    @ColumnInfo(name = "image_date_taken") val imageDateTaken: Long = 0L,
+    @ColumnInfo(name = "image_orientation") val imageOri: Int = 0,
+    @ColumnInfo(name = "image_size") val imageSize: Long = 0L,
+    @ColumnInfo(name = "image_address") val imageAddress: String = ""
+)
+
+```
+
 ### 패킷 구조
 
 ```
-[STX 1byte][TYPE 1byte][LENGTH 4byte][PAYLOAD N byte][ETX 1byte][CHECKSUM 1byte]
+[STX 1byte][CMD 1byte][LENGTH 4byte][PAYLOAD N byte][CHECKSUM 1byte][ETX 1byte]
+- STX (Start of Text): 0x02
+- Packet Command (CMD): JSON 직렬화된 데이터 통신간 구분
+- LENGTH: PAYLOAD 길이 (4 byte, big-endian)
+- PAYLOAD: 전송데이터를 JSON 직렬화한 바이트 배열
+- CHECKSUM: (CMD + LENGTH + PAYLOAD) % 256
+- ETX (End of Text): 0x03
 ```
 
-### PAYLOAD 구조 (마커 데이터)
-
-| 필드 | 타입 | 크기 |
-|------|------|------|
-| 위도 (latitude) | double | 8 byte |
-| 경도 (longitude) | double | 8 byte |
-| 이미지 크기 | int | 4 byte |
-| 이미지 데이터 | byte[] | N byte (JPEG 압축) |
-
-- 이미지는 512px 이하로 리사이즈 후 JPEG 압축 전송
-- 대용량 이미지는 청크 분할 전송 검토 필요
-
----
-
-## 8. 기술 스택
-
-| 항목 | 내용 |
-|------|------|
-| 언어 | Kotlin |
-| 지도 | Google Maps SDK for Android |
-| 통신 | USB Host API, TCP Socket |
-| IDE | Android Studio |
-| API 키 관리 | `local.properties` → `MAPS_API_KEY` |
+### Packet CMD 종류 (확장 가능)
+| CMD | 설명 | 패킷 전송 방향|
+|-----|------|---|
+| 0x01 | image list (imageID + imageDisplayName + imageLat + imageLong 으로 구성된 단독 데이터 혹은 리스트) | Android → Electron |
+| 0x02 | image data request (imageID 단독 혹은 리스트) | Electron → Android |
+| 0x03 | thumbnail image data response (imageID + thumbnailImageData) | Android → Electron |
+| 0x04 | raw image data response (imageID + imageData) -> 향후 구현  | Android → Electron |
 
 ---
 
 ## 9. 개발 Phase (Android 파트)
 
-- [ ] DataTransport 인터페이스 설계
-- [ ] UsbTransport 구현 (자동 연결)
-- [ ] TcpTransport 구현 (설정 UI 연동)
-- [ ] 기존 Google Maps 코드 리팩토링
-- [ ] 마커 클릭 → 패킷 전송 구현
-- [ ] 탭 구조 DI 정리
+- [x] DataTransport 인터페이스 설계
+- [ ] UsbTransport 구현 (자동 연결) — 스켈레톤 완료, USB Host API 구현 필요
+- [x] TcpTransport 구현 (설정 UI 연동)
+- [x] 기존 Google Maps 코드 리팩토링
+- [x] 마커 클릭 → 패킷 전송 구현
+- [x] 탭 구조 DI 정리
 
 **완료 기준**
 - DataTransport를 Mock으로 교체해도 앱 정상 동작
@@ -219,13 +250,68 @@ jobs:
 
 > Google Maps SDK를 활용한 GPS 메타데이터 파싱 및 마커 + 썸네일 표시 구현
 
-
 ## 13. 작업 히스토리
 
 ### 사전 전제사항 
 - 수행한 작업들은 작업의 경중을 떠나서 모든 작업들이 해당 항목에 기록이 저장되어야한다. 
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
+
+### 2026-05-09 — 통신 레이어 전체 구현 + 로그 추가 (Claude Code)
+
+#### 1. 패킷 프로토콜 레이어 신규 구현
+
+- **`data/transport/ConnectionType.kt`** — `enum class ConnectionType { USB, TCP }`
+- **`data/transport/TransportState.kt`** — `sealed class`: `Disconnected` / `Connecting` / `Connected` / `Error(message)`
+- **`data/transport/DataTransport.kt`** — 추상화 인터페이스 (`StateFlow<TransportState>` + `SharedFlow<ByteArray>`)
+- **`data/model/packet/PacketCommand.kt`** — CMD enum (0x01~0x04)
+- **`data/model/packet/ImageListPayload.kt`** — CMD 0x01 페이로드
+- **`data/model/packet/ImageRequestPayload.kt`** — CMD 0x02 페이로드
+- **`data/model/packet/ThumbnailPayload.kt`** — CMD 0x03 페이로드
+- **`packet/PacketBuilder.kt`** — 패킷 프레이밍 object (`build`, `buildImageList`, `buildImageRequest`, `buildThumbnailResponse`)
+- **`packet/PacketParser.kt`** — 스트리밍 파서 class (`feed` → 청크 수신 대응, 체크섬 검증)
+
+#### 2. Transport 구현체 신규 구현
+
+- **`transport/TcpTransport.kt`** — TCP 소켓 구현체 (`@Singleton`)
+  - `configure(ip, port)` 런타임 설정
+  - `Dispatchers.IO` 기반 connect / read loop / send
+  - `isDisconnecting` 플래그로 의도적 해제 시 Error 상태 방지
+- **`transport/UsbTransport.kt`** — USB 구현체 스켈레톤 (USB Host API 구현 예정)
+- **`transport/TransportManager.kt`** — USB + TCP 동시 관리
+  - `sendToAll(packet)` / `sendTo(type, packet)` / `isAnyConnected`
+  - `receivedData`: 양쪽 merge + ConnectionType 태깅
+- **`di/AppScope.kt`** — `@ApplicationScope` qualifier
+- **`di/AppModule.kt`** — `provideApplicationScope()` 추가
+
+#### 3. 마커 클릭 → 패킷 전송 연결
+
+- **`GoogleMapScreenViewModel.kt`** — `TransportManager` 주입, `sendMarkerData(List<UserImg>)` 추가
+- **`GoogleMapsScreen.kt`** — `onClusterClick` / `onClusterItemClick` 에서 `viewModel.sendMarkerData()` 호출
+
+#### 4. 연결 설정 탭 (Tab 2) 신규 구현
+
+- **`ConnectionSettingsViewModel.kt`** — TCP IP/Port 상태 관리, `connectTcp()` / `disconnectTcp()`, port 유효성 검사(1~65535)
+- **`ConnectionSettingsScreen.kt`** — TCP / USB 카드 UI, 연결 상태 색상 표시(초록/노랑/회색/빨강), 연결 중 입력 필드 disabled
+- **`Constants.kt`** — `ConnectionSettings` 탭 추가 (2번째, `Icons.Filled.Settings`)
+- **`MainScreen.kt`** — `CurrentScreen`에 ConnectionSettings 케이스 추가
+
+#### 5. 로그 추가 (에러 분석용)
+
+| 파일 | 로그 포인트 |
+|------|------------|
+| `PacketBuilder` | build 시 cmd / payload크기 / 체크섬, 각 helper 메서드 호출 내용 |
+| `PacketParser` | feed 수신 바이트 수, STX 이전 garbage 바이트 경고, 불완전 패킷 대기, ETX 불일치·체크섬 오류·미지원 CMD 경고, 파싱 성공/실패 |
+| `TcpTransport` | configure / connect 시도·성공·실패, recv 바이트 수, send 바이트 수·실패, 상태 전환, disconnect |
+| `TransportManager` | sendToAll 대상 transport 목록, sendTo 타겟, 연결 없을 때 dropped 경고 |
+
+- 레벨 기준: `Log.d` 정상흐름 / `Log.i` 상태전환 / `Log.w` 복구가능 이상 / `Log.e` 연결·파싱 오류
+
+#### 6. 동작 검증
+
+- Android ↔ Electron 앱 간 TCP 통신 동작 확인 완료
+
+---
 
 ### 2026-05-07 — 코드 구조 진단 및 리팩토링 (Claude Code)
 
@@ -262,6 +348,116 @@ jobs:
 - **Dead code 제거**
   - `FireBaseAuthViewModel`: 사용하지 않던 `MyAppRepository` 주입 제거
   - `PhotoBroadcastReceiver`: 전체 주석 처리된 코드 제거 (빈 `onReceive`만 유지)
+
+---
+
+### 2026-05-09 — 마커 클릭 → 패킷 전송 + 연결 설정 탭 구현 (Claude Code)
+
+#### 핵심 기능: 마커 클릭 → Electron 전송
+
+- **`GoogleMapScreenViewModel.kt`** — `TransportManager` 주입, `sendMarkerData(List<UserImg>)` 추가
+  - 단독 마커 클릭 → `listOf(image)` 1개짜리 리스트로 전송
+  - 클러스터 클릭 → 클러스터 전체 이미지 리스트 전송
+  - 내부적으로 `UserImg → ImageListItem` 변환 후 `PacketBuilder.buildImageList()` → `transportManager.sendToAll(packet)`
+
+- **`GoogleMapsScreen.kt`** — 클릭 핸들러에 `viewModel.sendMarkerData()` 연결
+  - `onClusterClick` → `sendMarkerData(images)` 호출
+  - `onClusterItemClick` → `sendMarkerData(listOf(image))` 호출
+  - 기존 UI 상태 변경(`bottomBarState`, `selectedCluster` 등) 유지하면서 전송 추가
+
+#### 연결 설정 탭 (Tab 2)
+
+- **`ConnectionSettingsViewModel.kt`** — 신규 `@HiltViewModel`
+  - `tcpState`, `usbState`: `TransportManager`에서 각 transport의 `StateFlow` 직접 노출
+  - `tcpIp`, `tcpPort`: 입력 상태 관리 (port는 숫자만, 최대 5자리 validation)
+  - `connectTcp()`: `configure(ip, port)` → `connect()` 순서 보장
+  - `isTcpConnectEnabled`: IP 비어있지 않음 + port 유효(1~65535) + Disconnected 상태 일 때만 true
+
+- **`ConnectionSettingsScreen.kt`** — 신규 Composable
+  - TCP 카드: IP/Port 입력 필드 + 연결/해제 버튼 + 상태 표시
+  - USB 카드: 상태 표시 + 자동 감지 안내 문구
+  - 상태 색상: Connected=초록 / Connecting=노랑 / Disconnected=회색 / Error=빨강
+  - 연결 중·연결됨 상태에서는 IP/Port 필드 disabled 처리
+
+#### 탭 구조 업데이트
+
+- **`Constants.kt`** — `ConnectionSettings` 탭 추가 (`Icons.Filled.Settings`, 2번째 위치)
+- **`MainScreen.kt`** — `CurrentScreen`에 `ConnectionSettings` → `ConnectionSettingsScreen` 케이스 추가
+
+---
+
+### 2026-05-09 — TcpTransport / UsbTransport / TransportManager 구현 (Claude Code)
+
+#### transport/ 구현체 신규 생성
+
+- **`TcpTransport.kt`** — `DataTransport` TCP 구현체 (`@Singleton`)
+  - `configure(ip, port)` 런타임 설정 메서드 (설정 UI 연동 포인트)
+  - `connect()` → `Dispatchers.IO`에서 소켓 연결 후 read loop 진입
+  - read loop: 4KB 버퍼 단위로 수신, `_receivedData.emit()` 으로 방출
+  - `isDisconnecting` 플래그로 의도적 연결 해제 시 `Error` 상태 전환 억제
+  - `send()` → `Dispatchers.IO`에서 `OutputStream.write()` + `flush()`
+
+- **`UsbTransport.kt`** — `DataTransport` USB 구현체 스켈레톤 (`@Singleton`)
+  - 인터페이스 구조 완성, 내부는 TODO (USB Host API: UsbManager, BroadcastReceiver, bulkTransfer)
+  - `connect()` 호출 시 "USB not yet implemented" Error 상태 반환
+
+- **`TransportManager.kt`** — USB + TCP 동시 관리 (`@Singleton`)
+  - `sendToAll(packet)` — 현재 Connected 상태인 모든 transport에 브로드캐스트
+  - `sendTo(ConnectionType, packet)` — 특정 transport에만 송신
+  - `receivedData: Flow<Pair<ConnectionType, ByteArray>>` — 양쪽 receivedData merge, 출처 태깅
+  - `isAnyConnected` — 하나라도 연결됐는지 확인
+
+#### DI 업데이트
+
+- **`di/AppScope.kt`** — `@ApplicationScope` qualifier annotation 신규 생성
+- **`di/AppModule.kt`** — `provideApplicationScope()` 추가
+  - `CoroutineScope(SupervisorJob() + Dispatchers.Default)` → TcpTransport/UsbTransport에 주입
+  - `TcpTransport`, `UsbTransport`, `TransportManager` 는 `@Singleton @Inject constructor` 방식으로 Hilt 자동 제공
+
+#### 동시 활성화 지원 설계
+
+- USB, TCP 각각 독립적인 `StateFlow<TransportState>` 관리 → 서로 영향 없음
+- `TransportManager.sendToAll()` 로 양쪽 동시 송신 가능
+- `TransportManager.receivedData` merge로 양쪽 수신 데이터 단일 스트림 처리
+
+---
+
+### 2026-05-09 — 통신 프로토콜 레이어 구현 (Claude Code)
+
+#### transport/ 패키지 신규 생성
+
+- **`ConnectionType.kt`** — `enum class ConnectionType { USB, TCP }`
+- **`TransportState.kt`** — `sealed class TransportState`: `Disconnected` / `Connecting` / `Connected` / `Error(message)`
+- **`DataTransport.kt`** — 통신 추상화 인터페이스
+  - `val state: StateFlow<TransportState>` (MD 초안의 `isConnected: Boolean`을 StateFlow로 격상 → UI 옵저빙 + 에러 상태 표현)
+  - `val receivedData: SharedFlow<ByteArray>` (MD 초안의 콜백 대신 SharedFlow → 여러 collector 지원, 코루틴 친화적)
+  - `fun connect()` / `fun send(packet: ByteArray)` / `fun disconnect()`
+
+#### packet/ 패키지 신규 생성
+
+- **`PacketCommand.kt`** — CMD 코드 enum (`IMAGE_LIST 0x01`, `IMAGE_DATA_REQUEST 0x02`, `THUMBNAIL_RESPONSE 0x03`, `RAW_IMAGE_RESPONSE 0x04`)
+- **`payload/ImageListPayload.kt`** — CMD 0x01 페이로드 (`ImageListItem` + `ImageListPayload`)
+- **`payload/ImageRequestPayload.kt`** — CMD 0x02 페이로드 (`imageIDs: List<Int>`)
+- **`payload/ThumbnailPayload.kt`** — CMD 0x03 페이로드 (`imageID` + Base64 `thumbnailData`)
+- **`PacketBuilder.kt`** — 패킷 프레이밍 object
+  - `build(command, payload)` — `[STX][CMD][LENGTH 4B][PAYLOAD][CHECKSUM][ETX]` 조립
+  - `buildImageList()` / `buildImageRequest()` / `buildThumbnailResponse()` 헬퍼
+  - CHECKSUM = `(CMD + LENGTH bytes + PAYLOAD bytes) % 256`
+- **`PacketParser.kt`** — 스트리밍 파서 class
+  - `ArrayDeque<Byte>` 내부 버퍼로 청크 수신 대응 (패킷이 여러 조각에 걸쳐 와도 안전)
+  - `feed(ByteArray): List<ParsedPacket>` — 완성된 패킷만 반환, 불완전한 패킷은 버퍼에 유지
+  - STX 탐색 → 길이 파싱 → 체크섬 검증 → ETX 확인 순서로 파싱, 불량 패킷은 스킵 후 재탐색
+  - 페이로드 역직렬화 헬퍼: `parseImageList()` / `parseImageRequest()` / `parseThumbnail()`
+  - `reset()` — 버퍼 초기화 (재연결 시 사용)
+
+#### 설계 원칙 적용 사항
+
+| 원칙 | 적용 내용 |
+|------|----------|
+| USB/TCP 가변 | `DataTransport` 인터페이스로 완전 추상화, 구현체 런타임 교체 가능 |
+| 모듈 독립성 | `packet/` 레이어는 Android 의존성 최소화, payload 모델은 순수 Kotlin data class |
+| 확장성 | `PacketCommand`에 CMD 추가만으로 새 패킷 타입 지원 |
+| 안전성 | 체크섬 검증 실패 / ETX 불일치 / 길이 이상(>10MB) 패킷은 자동 스킵 |
 
 ---
 

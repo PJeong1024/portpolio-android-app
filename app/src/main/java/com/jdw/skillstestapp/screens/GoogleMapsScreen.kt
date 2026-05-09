@@ -125,15 +125,19 @@ fun DisplayGoogleMap(viewModel: GoogleMapScreenViewModel) {
                 Clustering(
                     items = clusterItems,
                     onClusterClick = { cluster ->
-                        selectedCluster = cluster.items
+                        val images = cluster.items
                             .map { it.source }
                             .sortedByDescending { it.imageDateTaken }
+                        selectedCluster = images
                         bottomBarState = BottomBarState.ImageListState
+                        viewModel.sendMarkerData(images)
                         false
                     },
                     onClusterItemClick = { clusterItem ->
-                        selectedClusterItem = clusterItem.source
+                        val image = clusterItem.source
+                        selectedClusterItem = image
                         bottomBarState = BottomBarState.ImageItemState
+                        viewModel.sendMarkerData(listOf(image))
                         false
                     },
                     clusterContent = null,

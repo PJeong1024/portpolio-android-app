@@ -145,6 +145,12 @@ fun CurrentScreen(
             paddingValues = paddingValues
         )
 
+        BottomNaviBarScreen.ConnectionSettings -> ConnectionSettingsScreen(
+            navController = navController,
+            viewModel = hiltViewModel(),
+            paddingValues = paddingValues
+        )
+
         BottomNaviBarScreen.GeminiCharRoom -> GeminiCharRoomScreen(
             navController = navController,
             viewModel = hiltViewModel(),
