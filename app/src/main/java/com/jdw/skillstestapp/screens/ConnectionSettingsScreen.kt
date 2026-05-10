@@ -126,6 +126,8 @@ private fun TcpConnectionCard(viewModel: ConnectionSettingsViewModel) {
 @Composable
 private fun UsbConnectionCard(viewModel: ConnectionSettingsViewModel) {
     val usbState by viewModel.usbState.collectAsState()
+    val isConnected = usbState is TransportState.Connected
+    val isConnecting = usbState is TransportState.Connecting
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -139,10 +141,30 @@ private fun UsbConnectionCard(viewModel: ConnectionSettingsViewModel) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "USB 케이블 연결 시 자동으로 감지됩니다.",
+                text = if (isConnecting) "USB 디바이스 연결을 기다리는 중..."
+                       else "USB 케이블 연결 시 자동으로 감지됩니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isConnected || isConnecting) {
+                OutlinedButton(
+                    onClick = viewModel::disconnectUsb,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                ) {
+                    Text("감지 중지")
+                }
+            } else {
+                Button(
+                    onClick = viewModel::connectUsb,
+                    enabled = viewModel.isUsbConnectEnabled,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("감지 시작")
+                }
+            }
         }
     }
 }

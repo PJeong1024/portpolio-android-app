@@ -7,6 +7,7 @@
 
 ## 작업간 주요 공지사항
 - 작업 범위는 /android-app 디렉토리 내 Android 앱 개발로 한정
+- **[중요] 세션 시작 시 이 파일(`android-app/CLAUDE.md`)만 주 참조로 사용할 것. 상위 폴더(`portfolio-project/CLAUDE.md`)는 읽지 않아도 됨. 내용 충돌 시 이 파일이 항상 우선.**
 - 필요시, 다른 폴더의 md 파일 참조가 가능하지만, md 파일 수정은 불가함
 - 작업간 모든 내역은 히스토리 섹션에 기록하여 향후 작업간 참조
 
@@ -256,6 +257,107 @@ jobs:
 - 수행한 작업들은 작업의 경중을 떠나서 모든 작업들이 해당 항목에 기록이 저장되어야한다. 
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
+
+### 2026-05-10 — UsbTransport AOA 방식으로 전환 (Claude Code)
+
+#### 배경
+USB Host API(Android가 주변기기 탐색)로는 Android↔Mac 직접 통신 불가.
+Android가 Mac에 연결될 때 Android는 USB Device 역할이므로 USB Accessory(AOA) API가 올바른 구현.
+Electron 측도 `serialport` → `node-usb` + AOA 핸드셰이크로 변경 필요(Electron 쪽은 별도 진행).
+
+#### 변경 내용
+
+- **`transport/UsbTransport.kt`** — USB Host API 전면 교체 → USB Accessory API
+  - `UsbDevice` / `bulkTransfer` 방식 제거
+  - `UsbAccessory` / `ParcelFileDescriptor` 기반으로 재작성
+  - `usbManager.accessoryList` 로 이미 연결된 액세서리 탐지
+  - `openAccessory()` → `FileInputStream` / `FileOutputStream` 스트림 I/O (TCP와 동일 구조)
+  - read loop: `inputStream.read()` 블로킹 — -1이면 호스트 종료로 Disconnected 전환
+  - `send()`: `outputStream.write()` + `flush()`
+  - BroadcastReceiver: `ACTION_USB_ACCESSORY_ATTACHED` / `ACTION_USB_ACCESSORY_DETACHED` / 권한 응답
+  - `isDisconnecting` 플래그로 의도적 해제 시 Error 전환 억제
+
+- **`AndroidManifest.xml`** — `android.hardware.usb.host` → `android.hardware.usb.accessory`
+
+#### AOA 연결 흐름
+
+```
+① Android: "감지 시작" 클릭 → UsbTransport.connect() → BroadcastReceiver 등록
+② Electron(Mac): node-usb로 Android 장치 감지 → AOA 핸드셰이크(제조사·모델 문자열 전송)
+③ Android: 액세서리 모드로 재시작 → ACTION_USB_ACCESSORY_ATTACHED 수신
+④ Android: 권한 요청 → 승인 → openAccessory() → Connected
+⑤ 이후 패킷 송수신은 TCP와 동일한 스트림 구조
+케이블 분리: ACTION_USB_ACCESSORY_DETACHED → Disconnected 자동 전환
+```
+
+---
+
+### 2026-05-10 — USB Transport 전체 구현 (Claude Code)
+
+#### UsbTransport.kt 전체 구현 (스켈레톤 → 실 동작)
+
+- **`AndroidManifest.xml`** — `android.hardware.usb.host` feature 선언 추가 (`required=false`)
+- **`transport/UsbTransport.kt`** — USB Host API 전체 구현
+  - `BroadcastReceiver` 동적 등록/해제: `ACTION_USB_PERMISSION` / `ACTION_USB_DEVICE_ATTACHED` / `ACTION_USB_DEVICE_DETACHED`
+  - `connect()`: 이미 연결된 디바이스 있으면 즉시 permission 요청 → 없으면 Connecting 상태로 attach 대기
+  - `requestOrOpen()`: 권한 있으면 `openDevice()`, 없으면 `UsbManager.requestPermission()` 호출
+  - `openDevice()`: CDC Data 인터페이스 탐색 → `claimInterface()` → `Connected` 상태 전환 → read loop 시작
+  - `findBulkEndpoints()`: 1차 CDC Data class(0x0A) 우선 탐색, 없으면 bulk 엔드포인트 pair가 있는 인터페이스 fallback
+  - read loop: `bulkTransfer(inEp, buffer, size, 200ms)` 폴링, `>0` 수신/`0` timeout 재시도/`<0` 오류 처리
+  - `send()`: `bulkTransfer(outEp, packet, size, 3000ms)` → IO 디스패처
+  - `disconnect()`: read job cancel → connection close → BroadcastReceiver unregister → Disconnected 전환
+  - `isDisconnecting` 플래그로 detach 이벤트/오류 시 의도적 해제와 구분
+  - API 33+ `RECEIVER_NOT_EXPORTED` 대응
+
+- **`ConnectionSettingsViewModel.kt`** — USB connect/disconnect 메서드 추가
+  - `connectUsb()` / `disconnectUsb()` 추가
+  - `isUsbConnectEnabled`: `Disconnected || Error` 상태일 때 활성화
+
+- **`ConnectionSettingsScreen.kt`** — USB 카드 UI 업데이트
+  - "감지 시작" 버튼 (Disconnected/Error 상태) → `connectUsb()` 호출
+  - "감지 중지" 버튼 (Connected/Connecting 상태) → `disconnectUsb()` 호출
+  - Connecting 상태 안내 문구: "USB 디바이스 연결을 기다리는 중..."
+
+#### 동작 흐름 (TCP와 동일 추상화 레벨)
+
+```
+감지 시작 버튼 클릭
+  → UsbTransport.connect()
+  → 디바이스 없음: Connecting 대기 (BroadcastReceiver 등록)
+  → 디바이스 꽂힘: ACTION_USB_DEVICE_ATTACHED
+  → permission 요청 → 승인
+  → openDevice() → Connected
+  → bulkTransfer read loop 시작
+마커 클릭
+  → TransportManager.sendToAll() → UsbTransport.send()
+  → bulkTransfer(outEp, packet)
+케이블 뽑힘: ACTION_USB_DEVICE_DETACHED → Disconnected 자동 전환
+```
+
+---
+
+### 2026-05-10 — 설정 UI 재배치 + 재연결 버그 수정 (Claude Code)
+
+#### 1. 연결 설정 진입 경로 변경 (탭 → 상단 앱 바 드롭다운)
+
+- **`Constants.kt`** — `ConnectionSettings` enum 항목 및 `items` 리스트에서 제거, `Icons.Filled.Settings` import 제거
+- **`Components.kt`** — `SkillsTestAppBar`에 `additionalActions: @Composable RowScope.() -> Unit` 슬롯 추가, `navigationIcon` 블록 추가 (icon 파라미터 실제 사용)
+- **`MainScreen.kt`** — 설정 드롭다운 상태(`showSettingsMenu`, `showConnectionSettings`) 추가
+  - 상단 앱 바 오른쪽에 설정 아이콘(⚙) 추가
+  - 클릭 시 드롭다운: "Googlemap 설정" / "Chat 설정" / "Weather 설정"
+  - "Googlemap 설정" 클릭 → 기존 `ConnectionSettingsScreen` 전체 화면으로 진입
+  - 설정 화면 진입 시 하단 탭 숨김, 앱 바에 뒤로가기 화살표(←) 표시
+  - `CurrentScreen`에서 `ConnectionSettings` case 제거
+  - Chat / Weather 설정은 리스트 항목만 구현 (향후 확장용)
+
+#### 2. TCP 재연결 버그 수정
+
+- **`ConnectionSettingsViewModel.kt`** — `isTcpConnectEnabled` 조건 수정
+  - 기존: `tcpState is Disconnected` 일 때만 연결 버튼 활성화
+  - 수정: `tcpState is Disconnected || tcpState is Error` 일 때 활성화
+  - 효과: 연결 해제 후 Error 상태가 되어도 재연결 버튼 활성화
+
+---
 
 ### 2026-05-09 — 통신 레이어 전체 구현 + 로그 추가 (Claude Code)
 

@@ -46,5 +46,16 @@ class ConnectionSettingsViewModel @Inject constructor(
     val isTcpConnectEnabled: Boolean
         get() = _tcpIp.value.isNotBlank() &&
                 _tcpPort.value.toIntOrNull()?.let { it in 1..65535 } == true &&
-                tcpState.value is TransportState.Disconnected
+                (tcpState.value is TransportState.Disconnected || tcpState.value is TransportState.Error)
+
+    fun connectUsb() {
+        transportManager.usbTransport.connect()
+    }
+
+    fun disconnectUsb() {
+        transportManager.usbTransport.disconnect()
+    }
+
+    val isUsbConnectEnabled: Boolean
+        get() = usbState.value is TransportState.Disconnected || usbState.value is TransportState.Error
 }
