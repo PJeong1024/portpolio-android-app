@@ -258,6 +258,16 @@ jobs:
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
 
+### 2026-05-10 — AOA accessory_filter 등록 (Claude Code)
+
+- **`res/xml/accessory_filter.xml`** — 신규 생성
+  - Electron 측이 AOA 핸드셰이크에서 전송하는 문자열과 매칭: `manufacturer="GPSMarkerViewer" model="GPSMarkerViewer"`
+- **`AndroidManifest.xml`** — MainActivity에 추가
+  - `USB_ACCESSORY_ATTACHED` intent-filter 등록 (USB 케이블 연결 시 앱 자동 연결 트리거)
+  - `android.hardware.usb.action.USB_ACCESSORY_ATTACHED` meta-data로 `accessory_filter.xml` 연결
+
+---
+
 ### 2026-05-10 — UsbTransport AOA 방식으로 전환 (Claude Code)
 
 #### 배경
