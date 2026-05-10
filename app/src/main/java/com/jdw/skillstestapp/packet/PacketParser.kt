@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.jdw.skillstestapp.data.model.packet.ImageListPayload
 import com.jdw.skillstestapp.data.model.packet.ImageRequestPayload
 import com.jdw.skillstestapp.data.model.packet.PacketCommand
+import com.jdw.skillstestapp.data.model.packet.RawImagePayload
 import com.jdw.skillstestapp.data.model.packet.ThumbnailPayload
 
 /**
@@ -141,6 +142,16 @@ class PacketParser {
         dto.imageID to bytes
     }.getOrElse {
         Log.e(TAG, "parseThumbnail failed: ${it.message}")
+        null
+    }
+
+    fun parseRawImage(payload: ByteArray): Pair<Int, ByteArray>? = runCatching {
+        val dto = gson.fromJson(payload.toString(Charsets.UTF_8), RawImagePayload::class.java)
+        val bytes = Base64.decode(dto.imageData, Base64.NO_WRAP)
+        Log.d(TAG, "parseRawImage: imageID=${dto.imageID} decoded=${bytes.size}B")
+        dto.imageID to bytes
+    }.getOrElse {
+        Log.e(TAG, "parseRawImage failed: ${it.message}")
         null
     }
 

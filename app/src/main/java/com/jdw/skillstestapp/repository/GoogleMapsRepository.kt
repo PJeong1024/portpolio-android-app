@@ -1,6 +1,8 @@
 package com.jdw.skillstestapp.repository
 
 import android.content.ContentResolver
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.ExifInterface
 import android.provider.MediaStore
 import android.util.Log
@@ -8,6 +10,7 @@ import com.jdw.skillstestapp.data.UserImgDao
 import com.jdw.skillstestapp.data.model.UserImg
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
@@ -88,6 +91,47 @@ class GoogleMapsRepository @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Loads image at [imagePath], scales down so the longest side ≤ 512px, returns JPEG bytes.
+     * Called on IO dispatcher by the ViewModel.
+     */
+    fun loadThumbnailBytes(imagePath: String): ByteArray? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imagePath, bounds)
+        val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+        var sampleSize = 1
+        while (maxDim / sampleSize > 512) sampleSize *= 2
+
+        val bitmap = BitmapFactory.decodeFile(imagePath, BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+        }) ?: return null
+
+        ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
+            bitmap.recycle()
+            out.toByteArray()
+        }
+    }.getOrElse {
+        Log.e(TAG, "loadThumbnailBytes failed ($imagePath): ${it.message}")
+        null
+    }
+
+    /**
+     * Loads full-size image at [imagePath] and returns JPEG bytes.
+     * Called on IO dispatcher by the ViewModel.
+     */
+    fun loadRawImageBytes(imagePath: String): ByteArray? = runCatching {
+        val bitmap = BitmapFactory.decodeFile(imagePath) ?: return null
+        ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            bitmap.recycle()
+            out.toByteArray()
+        }
+    }.getOrElse {
+        Log.e(TAG, "loadRawImageBytes failed ($imagePath): ${it.message}")
+        null
     }
 
     private fun readExifData(imagePath: String): Pair<Double, Double>? {

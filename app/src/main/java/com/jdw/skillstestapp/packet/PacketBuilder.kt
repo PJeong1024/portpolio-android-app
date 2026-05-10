@@ -7,6 +7,7 @@ import com.jdw.skillstestapp.data.model.packet.ImageListItem
 import com.jdw.skillstestapp.data.model.packet.ImageListPayload
 import com.jdw.skillstestapp.data.model.packet.ImageRequestPayload
 import com.jdw.skillstestapp.data.model.packet.PacketCommand
+import com.jdw.skillstestapp.data.model.packet.RawImagePayload
 import com.jdw.skillstestapp.data.model.packet.ThumbnailPayload
 import java.nio.ByteBuffer
 
@@ -48,9 +49,16 @@ object PacketBuilder {
     }
 
     fun buildThumbnailResponse(imageID: Int, thumbnailBytes: ByteArray): ByteArray {
-        Log.d(TAG, "buildThumbnailResponse: imageID=$imageID thumbnailSize=${thumbnailBytes.size}B")
+        Log.d(TAG, "buildThumbnailResponse: imageID=$imageID size=${thumbnailBytes.size}B")
         val base64 = Base64.encodeToString(thumbnailBytes, Base64.NO_WRAP)
         val json = gson.toJson(ThumbnailPayload(imageID, base64))
         return build(PacketCommand.THUMBNAIL_RESPONSE, json.toByteArray(Charsets.UTF_8))
+    }
+
+    fun buildRawImageResponse(imageID: Int, imageBytes: ByteArray): ByteArray {
+        Log.d(TAG, "buildRawImageResponse: imageID=$imageID size=${imageBytes.size}B")
+        val base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+        val json = gson.toJson(RawImagePayload(imageID, base64))
+        return build(PacketCommand.RAW_IMAGE_RESPONSE, json.toByteArray(Charsets.UTF_8))
     }
 }

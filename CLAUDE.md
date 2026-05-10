@@ -258,6 +258,47 @@ jobs:
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
 
+### 2026-05-10 — CMD 0x02 수신 핸들러 + 0x03/0x04 응답 구현 (Claude Code) ✅ 동작 검증 완료
+
+#### 배경
+`TransportManager.receivedData`를 아무도 구독하지 않아 Electron → Android CMD 0x02(이미지 요청)를 수신해도 아무 처리 없이 버려지던 상태. 0x04 페이로드/빌더/파서도 미구현.
+
+#### 신규 파일
+
+- **`data/model/packet/RawImagePayload.kt`** — CMD 0x04 페이로드 data class (`imageID`, `imageData: String` Base64)
+
+#### 수정 파일
+
+- **`packet/PacketBuilder.kt`** — `buildRawImageResponse(imageID, imageBytes)` 추가
+- **`packet/PacketParser.kt`** — `parseRawImage(payload)` 추가 (RawImagePayload 역직렬화)
+- **`repository/GoogleMapsRepository.kt`** — 이미지 로딩 메서드 2개 추가
+  - `loadThumbnailBytes(imagePath)`: 최장변 ≤ 512px로 다운스케일, JPEG 75% 품질
+  - `loadRawImageBytes(imagePath)`: 원본 크기, JPEG 90% 품질
+  - BitmapFactory 기반, inSampleSize로 메모리 효율적 축소
+- **`GoogleMapScreenViewModel.kt`** — 핵심 변경
+  - `packetParsers: Map<ConnectionType, PacketParser>` — 소스별 독립 파서 (스트림 버퍼 상태 유지)
+  - `init` 블록에 `transportManager.receivedData` 구독 추가
+  - CMD 0x02 수신 → `respondWithThumbnail()` 호출 (Dispatchers.IO)
+  - `respondWithThumbnail(imageID, sourceType)`: 0x03 응답 → 요청 온 transport로만 `sendTo()`
+  - `respondWithRawImage(imageID, sourceType)`: 0x04 응답 구현 완료, 현재 미호출 (`@Suppress("unused")`)
+
+#### 동작 흐름 (현재 활성)
+
+```
+Electron → CMD 0x02 (imageID 리스트) → TCP/USB 수신
+  → TransportManager.receivedData 방출
+  → GoogleMapScreenViewModel 구독
+  → PacketParser.feed() → IMAGE_DATA_REQUEST 파싱
+  → imageID별 respondWithThumbnail() (IO 디스패처)
+    → _userImages에서 imageID 조회
+    → GoogleMapsRepository.loadThumbnailBytes()
+    → PacketBuilder.buildThumbnailResponse()
+    → TransportManager.sendTo(sourceType, packet)
+  → Electron 수신 CMD 0x03 → InfoWindow 썸네일 표시
+```
+
+---
+
 ### 2026-05-10 — AOA accessory_filter 등록 (Claude Code)
 
 - **`res/xml/accessory_filter.xml`** — 신규 생성
