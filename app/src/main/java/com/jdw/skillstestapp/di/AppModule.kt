@@ -4,6 +4,10 @@ import android.content.ContentResolver
 import android.content.Context
 import androidx.room.Room
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.libraries.places.api.Places
+import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.jdw.skillstestapp.BuildConfig
@@ -64,6 +68,20 @@ object AppModule {
     @Provides
     @Singleton
     fun getFirebaseFireStoreInstance(): FirebaseFirestore = FirebaseFirestore.getInstance()
+
+    @Provides
+    @Singleton
+    fun provideFusedLocationClient(@ApplicationContext context: Context): FusedLocationProviderClient =
+        LocationServices.getFusedLocationProviderClient(context)
+
+    @Provides
+    @Singleton
+    fun providePlacesClient(@ApplicationContext context: Context): PlacesClient {
+        if (!Places.isInitialized()) {
+            Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.GOOGLE_MAPS_API_KEY)
+        }
+        return Places.createClient(context)
+    }
 
     @Provides
     @Singleton

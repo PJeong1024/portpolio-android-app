@@ -1,7 +1,7 @@
-# Android 앱 명세 (Google Maps 마커 송신)
+# Android 앱 명세
 
-> 최종 업데이트: 2026-05-07  
-> 원본 프로젝트: GoogleMap 기반 Android ↔ macOS 크로스 플랫폼 연동
+> 최종 업데이트: 2026-06-01  
+> 원본 프로젝트: Google Maps + Places API 기반 포트폴리오 Android 앱
 
 ---
 
@@ -13,56 +13,94 @@
 
 ## 1. 앱 개요
 
-갤러리 사진의 GPS 메타데이터를 파싱하여 Google Maps 위에 마커를 표시하고,  
-마커 클릭 시 GPS 좌표 + 이미지 데이터를 USB CDC 또는 TCP/IP로 macOS Electron 앱에 전송한다.
+Google Maps SDK와 Places API를 중심으로 두 가지 독립적인 지도 기반 기능을 제공하는 포트폴리오 Android 앱.
 
-### 핵심 기능
-- 갤러리 사진 GPS 메타데이터 파싱
-- Google Maps SDK로 마커 + 썸네일 표시
-- USB (USB Host API) / TCP (Socket) 이중 송신 지원
-- 런타임 교체 가능한 DataTransport 추상화 인터페이스 설계
-- 확장성을 고려한 모듈화 및 DI 설계
+### Tab 1 — Google Maps Marker
+갤러리 사진의 GPS 메타데이터를 파싱하여 Google Maps 위에 마커/클러스터를 표시하고,  
+마커 클릭 시 이미지 데이터를 USB AOA 또는 TCP/IP로 macOS Electron 앱에 전송한다.
+
+### Tab 2 — Food Search
+Google Places API를 활용하여 현재 위치 기반 주변 음식점을 검색하고,  
+이미지 마커로 지도에 표시하며 가게 상세 정보(영업시간·평점·리뷰·사진)를 제공한다.
+
+### 공통 기술 요소
+- USB AOA / TCP Socket 이중 통신, DataTransport 추상화 인터페이스 (Tab 1 전용)
+- 확장성을 고려한 모듈화 및 DI 설계 (Hilt)
+- Jetpack Compose 기반 UI, ViewModel + StateFlow 아키텍처
 
 ---
 
-## 2. 유저 시나리오 (Android 쪽)
+## 2. 유저 시나리오
 
+### Tab 1 — Google Maps Marker
 1. 앱 실행 → 갤러리 사진 로드 → GPS 메타데이터 파싱
-2. Google Maps 위에 마커 + 썸네일 표시
-3. 설정 탭에서 연결 방식 선택 (USB 자동 감지 or TCP IP/Port 입력)
-4. 마커 클릭 → GPS 좌표 + 이미지를 패킷으로 구성
-5. DataTransport(USB or TCP)로 macOS에 전송
-6. 마커 클릭마다 반복 송신
+2. Google Maps 위에 마커/클러스터 표시
+3. 앱 바 설정(⚙) → 연결 방식 선택 (USB 자동 감지 or TCP IP/Port 입력)
+4. 마커 클릭 → GPS 좌표 + 이미지 목록을 패킷으로 구성 → macOS 전송
+5. macOS Electron 앱이 수신하여 지도에 마커 표시, 이미지 요청 시 썸네일 응답
+
+### Tab 2 — Food Search
+1. 탭 진입 → 위치 권한 확인 (없으면 자동 요청)
+2. 현재 위치 기반 1km 반경 음식점 자동 검색
+3. 가게별 이미지 마커 비동기 로딩 (기본 아이콘 → 이미지 마커 교체)
+4. 마커 클릭 → 바텀 시트에 가게 상세 정보 표시 (영업 상태, 평점, 가격대, 영업시간, 사진, 리뷰)
+5. 클러스터 클릭 → 바텀 시트 가게 목록 → 항목 선택 → 상세 정보
+6. FAB(↺) → 주변 검색 재실행
 
 ---
 
-## 3. 시스템에서 Android의 위치
+## 3. 시스템 구조
 
+### Tab 1 — Google Maps Marker
 ```
-[Android 앱]  ← 여기
-  갤러리 로드 → GPS 파싱 → 지도 마커 표시
-  → 마커 클릭 → 패킷 구성
-  → DataTransport (USB or TCP)
-        ↓
+[Android 앱]
+  갤러리 로드 → GPS 파싱 → 지도 마커/클러스터 표시
+  → 마커 클릭 → PacketBuilder → CMD 0x01 전송
+  → DataTransport (UsbTransport or TcpTransport)
+        ↓                         ↑
+        ↓ CMD 0x01 (image list)   │ CMD 0x02 (image request)
+        ↓                         │ CMD 0x03 (thumbnail response)
 [macOS Electron 앱]
-  DataReceiver → 패킷 파싱 → 마커 누적 표시
+  DataReceiver → PacketParser → 마커 누적 표시
+  → 마커 클릭 → CMD 0x02 전송 → Android 응답 대기 → 썸네일 표시
+```
+
+### Tab 2 — Food Search
+```
+[Android 앱]
+  위치 권한 확인 → FusedLocationProvider → 현재 GPS 좌표
+  → PlacesRepository.searchNearbyRestaurants() → Place 목록 수신
+  → 기본 마커 표시 → fetchPlacePhoto() 병렬 로딩 → 이미지 마커 교체
+  → 마커/클러스터 클릭 → BottomSheet 상세 정보 표시
+     (영업 상태 / 평점 / 가격대 / 영업시간 / 사진 그리드 / 리뷰)
 ```
 
 ---
 
 ## 4. 탭 구성
 
+> 탭 공식 명칭: **Tab 1 = "Google Maps Marker"**, **Tab 2 = "Food Search"**  
+> (BottomNaviBarScreen enum label 기준, 앱 하단 탭 표시 텍스트와 동일)
+
 ```
 MainActivity
-├── Tab 1 : Google Maps (핵심 기능)
-│           ├── 사진 GPS 파싱
-│           ├── 마커 + 썸네일 표시
-│           └── 마커 클릭 → 패킷 전송
-├── Tab 2 : 연결 설정
-│           ├── 연결 방식 선택 (USB / TCP)
-│           ├── TCP 설정 (IP, Port) ← TCP 선택 시만 활성화
-│           └── 연결 상태 표시
-└── Tab N : 기타 기능 (추후 확장)
+├── Tab 1 : Google Maps Marker ✅ 완료
+│           ├── 갤러리 GPS 파싱 + DB 저장
+│           ├── 마커/클러스터 표시 (UserImgClusterItem + Clustering)
+│           ├── 마커 클릭 → CMD 0x01 패킷 전송 (USB AOA / TCP)
+│           └── CMD 0x02 수신 → CMD 0x03/0x04 이미지 응답
+├── Tab 2 : Food Search ✅ 완료
+│           ├── 위치 권한 확인 + 현재 위치 기반 자동 검색
+│           ├── Places API 음식점 마커/클러스터 표시
+│           ├── 이미지 마커 비동기 로딩 (기본 아이콘 → 음식 사진으로 교체)
+│           ├── 마커 클릭 → 바텀 시트 상세 (영업상태·평점·가격대·영업시간·사진·리뷰)
+│           ├── 클러스터 클릭 → 바텀 시트 목록 → 항목 클릭 → 상세
+│           └── FAB(↺) 리프레시 버튼
+├── 앱 바 설정 아이콘(⚙) → 드롭다운 ✅ 완료
+│           └── Googlemap 설정 → ConnectionSettingsScreen 전체화면
+│                   ├── TCP 카드: IP/Port 입력 + 연결/해제
+│                   └── USB 카드: 감지 시작/중지 + 상태 표시
+└── Tab N : 기타 기능 (Chat, Weather, Firebase Auth)
 ```
 
 ---
@@ -71,19 +109,38 @@ MainActivity
 
 ```
 app/
+├── data/
+│   ├── transport/
+│   │   ├── ConnectionType.kt       # enum: USB, TCP
+│   │   ├── TransportState.kt       # sealed: Disconnected/Connecting/Connected/Error
+│   │   └── DataTransport.kt        # 추상화 인터페이스
+│   └── model/packet/
+│       ├── PacketCommand.kt        # CMD enum (0x01~0x04)
+│       ├── ImageListPayload.kt     # CMD 0x01 페이로드
+│       ├── ImageRequestPayload.kt  # CMD 0x02 페이로드
+│       ├── ThumbnailPayload.kt     # CMD 0x03 페이로드
+│       └── RawImagePayload.kt      # CMD 0x04 페이로드
 ├── transport/
-│   ├── DataTransport.kt       # 인터페이스
-│   ├── UsbTransport.kt        # USB 구현체
-│   └── TcpTransport.kt        # TCP 구현체
-├── map/
-│   ├── MapManager.kt          # 지도 관련 로직
-│   └── MarkerFactory.kt       # 마커 생성
+│   ├── TcpTransport.kt             # TCP 구현체 (@Singleton)
+│   ├── UsbTransport.kt             # USB AOA 구현체 (@Singleton)
+│   └── TransportManager.kt         # 이중 transport 관리 (@Singleton)
 ├── packet/
-│   ├── PacketBuilder.kt       # 패킷 구성
-│   └── PacketParser.kt        # 패킷 파싱
-└── ui/
-    ├── MapFragment.kt
-    └── SettingsFragment.kt
+│   ├── PacketBuilder.kt            # 패킷 프레이밍
+│   └── PacketParser.kt             # 스트리밍 파서
+├── repository/
+│   ├── GoogleMapsRepository.kt     # 이미지 로드
+│   └── PlacesRepository.kt         # Places API Nearby Search (searchNearbyRestaurants)
+├── di/
+│   ├── AppScope.kt                 # @ApplicationScope qualifier
+│   └── AppModule.kt                # Hilt 모듈 (PlacesClient + FusedLocationClient 포함)
+└── screens/
+    ├── GoogleMapsScreen.kt          # Tab 1: Google Maps Marker
+    ├── FoodSearchScreen.kt          # Tab 2: Food Search (지도 + 클러스터 + 바텀시트 + 이미지 그리드 + 리뷰)
+    ├── ConnectionSettingsScreen.kt  # 연결 설정 UI (TCP/USB)
+    └── viewmodel/
+        ├── GoogleMapScreenViewModel.kt    # 마커 전송, CMD 0x02/0x03/0x04 처리
+        ├── FoodSearchViewModel.kt         # 위치 획득 + Nearby Search + 사진 비동기 로딩
+        └── ConnectionSettingsViewModel.kt  # TCP/USB 연결 상태 관리
 ```
 
 ---
@@ -118,7 +175,7 @@ class TcpTransport(
 
 | 방식 | 연결 방법 | 사용자 액션 |
 |------|----------|------------|
-| USB CDC | 케이블 연결 시 자동 감지 | 없음 (자동) |
+| USB AOA | 앱 바 설정 → USB 카드 "감지 시작" → 케이블 연결 → 자동 연결 | "감지 시작" 버튼 클릭 |
 | TCP/IP | 설정 UI에서 IP/Port 입력 | IP + Port 입력 후 연결 |
 
 ---
@@ -185,16 +242,53 @@ data class UserImg(
 
 ## 9. 개발 Phase (Android 파트)
 
-- [x] DataTransport 인터페이스 설계
-- [ ] UsbTransport 구현 (자동 연결) — 스켈레톤 완료, USB Host API 구현 필요
-- [x] TcpTransport 구현 (설정 UI 연동)
-- [x] 기존 Google Maps 코드 리팩토링
-- [x] 마커 클릭 → 패킷 전송 구현
-- [x] 탭 구조 DI 정리
+### Phase 1~3 — GPS Marker Image Viewer + 통신 연동 ✅ 완료
 
-**완료 기준**
-- DataTransport를 Mock으로 교체해도 앱 정상 동작
-- 마커 클릭 시 패킷 송신 로직이 UI 코드에서 완전 분리
+- [x] DataTransport 인터페이스 설계 (StateFlow / SharedFlow 기반)
+- [x] TcpTransport 구현 (Coroutines, 설정 UI 연동)
+- [x] UsbTransport 구현 (USB AOA — Accessory API, BroadcastReceiver, FileStream I/O)
+- [x] TransportManager 구현 (sendToAll / sendTo / receivedData merge)
+- [x] PacketBuilder / PacketParser 구현 (CMD 0x01~0x04, 스트리밍 파서)
+- [x] 갤러리 GPS 파싱 + 마커/클러스터 표시
+- [x] 마커/클러스터 클릭 → CMD 0x01 패킷 전송
+- [x] CMD 0x02 수신 → CMD 0x03 썸네일 응답
+- [x] CMD 0x04 원본 이미지 응답 구현
+- [x] 연결 설정 UI (앱 바 드롭다운 → TCP/USB 카드)
+- [x] AOA accessory_filter.xml 등록 (GPSMarkerViewer)
+- [x] TCP / USB AOA 실기기 연동 테스트 완료
+- [x] E2E 전체 시나리오 최종 검증 완료
+
+### Phase 4 — Food Image Search Viewer (진행 중)
+
+- [x] Places SDK for Android 3.5.0 의존성 추가 (libs.versions.toml + build.gradle)
+- [x] PlacesClient DI 구성 (AppModule — initializeWithNewPlacesApiEnabled + createClient)
+- [x] FusedLocationProviderClient DI 구성 (AppModule)
+- [x] PlacesRepository 구현 (searchNearbyRestaurants — SearchNearbyRequest, CircularBounds 1km)
+- [x] FoodSearchViewModel 구현 (위치 획득 + Nearby Search + StateFlow)
+- [x] FoodSearchScreen 기본 UI 구현 (권한 체크 + 검색 버튼 + 결과 리스트 카드)
+- [x] FoodSearch 탭 추가 (Tab 2, Icons.Filled.Restaurant)
+- [x] Google Cloud Console에서 "Places API (New)" 활성화 (사용자 직접 수행)
+- [x] Places API 실기기 동작 검증 (음식점 리스트 수신 확인)
+- [x] FoodSearchScreen Google Maps 기반 UI 전면 재작성
+  - [x] 탭 진입 시 자동 위치 획득 + 자동 주변 검색 (버튼 제거)
+  - [x] 내 위치 파란점 표시 (MapProperties.isMyLocationEnabled)
+  - [x] 카메라 자동 이동 (LaunchedEffect + animate)
+  - [x] 음식점 마커 클러스터링 (PlaceClusterItem + Clustering)
+  - [x] 단독 마커 클릭 → 바텀바 PlaceDetail (이름/평점/주소 스크롤)
+  - [x] 클러스터 클릭 → 바텀바 PlaceList LazyColumn → 항목 클릭 → PlaceDetail
+  - [x] FAB 리프레시 버튼 (Refresh 아이콘, 재검색 트리거)
+  - [x] 에러 시 상단 Card 표시
+- [x] PlaceClusterItem 신규 생성 (map/PlaceClusterItem.kt)
+- [x] 이미지 마커 비동기 로딩 (PlacesRepository.fetchPlacePhoto, 기본 아이콘 → 이미지 마커 교체)
+- [x] 클러스터 리스트 썸네일 표시 (FoodBottomBarPlaceList)
+- [x] 가게 상세 사진 3열 그리드 (FoodBottomBarPlaceDetail + PhotoGrid)
+- [x] 영업 상태 chip 표시 (BusinessStatus: 폐업/임시휴업, isOpen(): 영업 종료)
+- [x] 가격대 표시 (PRICE_LEVEL → ₩~₩₩₩₩)
+- [x] 영업시간 표시 (OPENING_HOURS.weekdayText)
+- [x] 리뷰 목록 표시 (REVIEWS: 별점 + 작성자 + 시간 + 본문)
+- [x] 탭 공식 명칭 확정: Tab 1 = "Google Maps Marker", Tab 2 = "Food Search"
+- [x] BottomNaviBarScreen.GoogleMaps label 변경 ("Google Maps" → "Google Maps Marker")
+- [x] CLAUDE.md 문서 전면 업데이트 (앱 개요/시나리오/시스템 구조/탭 구성 재작성)
 
 ---
 
@@ -245,11 +339,13 @@ jobs:
 
 ## 12. 이력서 어필 포인트
 
-> USB CDC / TCP Socket 이중 통신 방식을 추상화 인터페이스로 설계하여 런타임 교체 가능한 로컬 통신 모듈 구현
+> USB AOA / TCP Socket 이중 통신 방식을 추상화 인터페이스로 설계하여 런타임 교체 가능한 로컬 통신 모듈 구현
 
-> Android ↔ macOS 간 커스텀 바이너리 패킷 프로토콜 설계 및 구현
+> Android ↔ macOS 간 커스텀 바이너리 패킷 프로토콜 설계 및 구현 (CMD 0x01~0x04)
 
-> Google Maps SDK를 활용한 GPS 메타데이터 파싱 및 마커 + 썸네일 표시 구현
+> Google Maps SDK를 활용한 GPS 메타데이터 파싱 및 마커/클러스터 + 썸네일 표시 구현
+
+> Google Places API 연동을 통한 현재 위치 기반 음식점 검색 및 이미지 마커 표시 구현 (Phase 4)
 
 ## 13. 작업 히스토리
 
@@ -257,6 +353,170 @@ jobs:
 - 수행한 작업들은 작업의 경중을 떠나서 모든 작업들이 해당 항목에 기록이 저장되어야한다. 
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
+
+### 2026-06-01 — 문서 전면 개편 + 탭 명칭 확정 (Claude Code)
+
+#### 변경 내용
+
+- **`utils/Constants.kt`** — `BottomNaviBarScreen.GoogleMaps` label `"Google Maps"` → `"Google Maps Marker"`
+- **`CLAUDE.md`** 전면 개편
+  - 제목: "Google Maps 마커 송신" 중심 → 멀티 피처 앱으로 재포지셔닝
+  - Section 1 (앱 개요): Tab 1 / Tab 2 동등 병렬 소개 구조로 재작성
+  - Section 2 (유저 시나리오): Tab 1 / Tab 2 시나리오 분리 기술
+  - Section 3: "시스템에서 Android의 위치" → "시스템 구조" 로 확장 (두 탭 모두 다이어그램 포함)
+  - Section 4 (탭 구성): 공식 명칭 명시, 완료 상태 반영
+  - Section 5 (모듈 구조): FoodSearchScreen 설명 현행화
+  - Phase 4 체크리스트: 완료 항목 전부 체크
+
+#### 탭 공식 명칭 (확정)
+- Tab 1: **Google Maps Marker** — 갤러리 GPS 파싱 + 마커 표시 + USB/TCP Electron 연동
+- Tab 2: **Food Search** — Places API 음식점 검색 + 이미지 마커 + 상세 정보
+
+---
+
+### 2026-06-01 — Phase 4 가게 상세 정보 확장 (Claude Code)
+
+#### 변경 내용
+
+- **`repository/PlacesRepository.kt`** — `placeFields`에 5개 추가: `BUSINESS_STATUS`, `CURRENT_OPENING_HOURS`, `OPENING_HOURS`, `PRICE_LEVEL`, `REVIEWS`
+- **`screens/FoodSearchScreen.kt`**
+  - `BusinessStatusChip`: `CLOSED_PERMANENTLY`(폐업·빨강), `CLOSED_TEMPORARILY`(임시휴업·주황), `isOpen()==false`(영업종료·회색) — 헤더 우측 표시
+  - 평점 행에 가격대(₩~₩₩₩₩) 함께 표시
+  - 영업시간 섹션: `openingHours.weekdayText` 7일 전체 표시
+  - 사진 그리드 (기존 유지)
+  - 리뷰 섹션: 별점 5개 표시 + 작성자 + 상대 시간 + 본문 3줄
+
+---
+
+### 2026-06-01 — Phase 4 이미지 마커 + 사진 그리드 구현 (Claude Code)
+
+#### 배경
+마커에 음식 이미지 표시, 클러스터 리스트 썸네일, 가게 상세 사진 그리드 구현.
+Places API 구조상 `searchNearby`에서 이미지 실데이터는 불가 (메타데이터만 수신) → 마커 먼저 표시 후 비동기 이미지 로딩 방식 채택.
+
+#### 수정 파일
+
+- **`repository/PlacesRepository.kt`** — `fetchPlacePhoto(photoMetadata, maxWidth, maxHeight): Result<Bitmap>` 추가
+  - `FetchPhotoRequest.builder(photoMetadata)` → `placesClient.fetchPhoto()` → Bitmap 반환
+
+- **`screens/viewmodel/FoodSearchViewModel.kt`**
+  - `_placePhotoThumbnails: MutableStateFlow<Map<String, Bitmap>>` — placeId → 썸네일 (마커/리스트용)
+  - `_selectedPlacePhotos: MutableStateFlow<List<Bitmap>>` — 현재 선택된 가게 전체 사진 (상세용)
+  - `loadThumbnailsAsync(places)`: `searchNearby` 완료 후 각 가게 첫 번째 사진 병렬 로딩 (200×200)
+  - `loadPhotosForPlace(place)`: 상세 진입 시 모든 사진 병렬 로딩 (600×600)
+  - `searchNearby()`: 리프레시 시 thumbnails/selectedPhotos 초기화
+
+- **`screens/FoodSearchScreen.kt`**
+  - `PlaceMarkerContent(bitmap)`: 로딩 완료 → 이미지 원형 마커, 미완료 → Restaurant 아이콘
+  - `Clustering.clusterItemContent` → `PlaceMarkerContent` 적용 (State 변경 시 자동 재렌더)
+  - `FoodBottomBarPlaceList`: 썸네일 56dp 라운드 박스 + 가게명/주소/평점
+  - `FoodBottomBarPlaceDetail`: 텍스트 정보 + `PhotoGrid` (사진 로딩 중 `CircularProgressIndicator`)
+  - `PhotoGrid`: 3열 고정 그리드 (LazyVerticalGrid 미사용 — verticalScroll 중첩 불가)
+  - 마커/리스트 항목 클릭 시 `viewModel.loadPhotosForPlace(place)` 호출
+
+#### 동작 흐름
+```
+searchNearby() 완료
+  → _places 업데이트 → 기본 마커(Restaurant 아이콘) 즉시 표시
+  → loadThumbnailsAsync() 병렬 실행
+    → 각 가게 fetchPhoto() 완료 → _placePhotoThumbnails 업데이트
+    → clusterItemContent 재구성 → 이미지 마커로 자동 교체
+
+마커/클러스터 항목 클릭
+  → loadPhotosForPlace() 병렬 실행
+    → 각 사진 fetchPhoto() 완료 → _selectedPlacePhotos에 순차 추가
+    → PhotoGrid 실시간 업데이트
+```
+
+---
+
+### 2026-06-01 — Phase 4 FoodSearchScreen Google Maps UI 전면 재작성 (Claude Code)
+
+#### 배경
+기존 FoodSearchScreen은 버튼 클릭 + 리스트 표시 방식이었음. 탭 진입 시 자동 시작 + 지도 기반 마커/클러스터 UI로 전면 재작성.
+
+#### 신규 파일
+
+- **`map/PlaceClusterItem.kt`** — Place → ClusterItem 래퍼
+  - `getPosition()`: `place.latLng` 기반
+  - `getTitle()`: `place.name`, `getSnippet()`: `place.address`
+
+#### 수정 파일
+
+- **`screens/viewmodel/FoodSearchViewModel.kt`**
+  - `_myLocation: MutableStateFlow<LatLng?>` + `myLocation` StateFlow 추가
+  - `searchNearby()`: 위치 획득 후 `_myLocation.value = location` 설정
+
+- **`screens/FoodSearchScreen.kt`** — 전면 재작성
+  - 탭 진입 시 권한 없으면 자동 권한 팝업, 있으면 `LaunchedEffect(Unit)`로 자동 `searchNearby()`
+  - `GoogleMap` + `MapProperties(isMyLocationEnabled = true)` → 내 위치 파란점
+  - `LaunchedEffect(myLocation)` → `cameraPositionState.animate()` 자동 카메라 이동
+  - `Clustering(PlaceClusterItem)` → 마커/클러스터 표시
+  - `FoodBottomBarState` 3상태: Empty / PlaceList / PlaceDetail
+    - 단독 마커 클릭 → `PlaceDetailState` (이름+평점+주소, verticalScroll)
+    - 클러스터 클릭 → `PlaceListState` LazyColumn → 항목 클릭 → `PlaceDetailState`
+    - 뒤로가기: 클러스터 출신이면 PlaceList, 단독이면 Empty
+  - FAB `Refresh` 버튼 → `viewModel.searchNearby()` 재호출
+  - 로딩 중 `CircularProgressIndicator`, 에러 시 상단 `Card` 표시
+
+#### 빌드 결과
+BUILD SUCCESSFUL
+
+---
+
+### 2026-06-01 — Places SDK 필드명 수정 (Claude Code)
+
+#### 배경
+Places SDK 3.5.0의 `Place.Field` enum에는 `DISPLAY_NAME`, `LOCATION`, `FORMATTED_ADDRESS`가 없음. 구버전 필드명으로 수정.
+
+#### 수정 내용
+
+| 잘못된 필드 | 올바른 필드 (3.5.0) |
+|---|---|
+| `Place.Field.DISPLAY_NAME` | `Place.Field.NAME` |
+| `Place.Field.LOCATION` | `Place.Field.LAT_LNG` |
+| `Place.Field.FORMATTED_ADDRESS` | `Place.Field.ADDRESS` |
+| `place.displayName?.text` | `place.name` |
+| `place.formattedAddress` | `place.address` |
+
+- **`repository/PlacesRepository.kt`** — `placeFields` 리스트 수정
+- **`screens/FoodSearchScreen.kt`** — `PlaceCard` 프로퍼티 접근 수정
+
+---
+
+### 2026-05-28 — Phase 4 준비: Places SDK 추가 + FoodSearch 탭 신규 생성 (Claude Code)
+
+#### 배경
+Phase 4 (Food Image Search Viewer) 구현을 위한 기반 준비. Places API 연동 테스트를 위한 별도 탭 및 기본 스캐폴딩 구성.
+
+#### 신규 파일
+
+- **`repository/PlacesRepository.kt`** — Places API 연동 Repository
+  - `searchNearbyRestaurants(location, radiusMeters, maxCount)`: 현재 위치 기반 음식점 Nearby Search
+  - `SearchNearbyRequest` + `CircularBounds` 기반, `Place.Field` 7개 요청 (ID, DISPLAY_NAME, LOCATION, RATING, FORMATTED_ADDRESS, TYPES, PHOTO_METADATAS)
+  - `suspendCancellableCoroutine`으로 콜백 → suspend 변환
+- **`screens/viewmodel/FoodSearchViewModel.kt`** — FoodSearch 전용 HiltViewModel
+  - `searchNearby()`: FusedLocationProviderClient로 현재 위치 획득 → PlacesRepository.searchNearbyRestaurants() 호출
+  - `places`, `isLoading`, `error` StateFlow 노출
+- **`screens/FoodSearchScreen.kt`** — Food Search 테스트 탭 UI
+  - `accompanist-permissions`로 위치 권한 체크 (권한 없으면 요청 뷰 표시)
+  - "주변 음식점 검색 (1km 반경)" 버튼 → ViewModel.searchNearby() 호출
+  - 검색 결과 LazyColumn: 음식점 이름 + 평점 + 주소 카드
+
+#### 수정 파일
+
+- **`gradle/libs.versions.toml`** — `places = "3.5.0"` 버전 추가, `places` 라이브러리 항목 추가
+- **`app/build.gradle.kts`** — `implementation(libs.places)` 의존성 추가
+- **`di/AppModule.kt`** — 2개 Provider 추가
+  - `provideFusedLocationClient()`: `LocationServices.getFusedLocationProviderClient(context)`
+  - `providePlacesClient()`: `Places.initializeWithNewPlacesApiEnabled()` + `Places.createClient()` (기존 MAPS_API_KEY 재사용)
+- **`utils/Constants.kt`** — `FoodSearch` 탭 추가 (`Icons.Filled.Restaurant`, Tab 2 위치)
+- **`screens/MainScreen.kt`** — `CurrentScreen`에 `FoodSearch → FoodSearchScreen` 케이스 추가
+
+#### 외부 설정 필요 사항
+- Google Cloud Console에서 해당 API 키에 **"Places API (New)"** 활성화 필요 (사용자에게 안내)
+
+---
 
 ### 2026-05-10 — CMD 0x02 수신 핸들러 + 0x03/0x04 응답 구현 (Claude Code) ✅ 동작 검증 완료
 
