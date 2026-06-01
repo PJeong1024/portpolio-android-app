@@ -23,6 +23,9 @@ Google Maps SDK와 Places API를 중심으로 두 가지 독립적인 지도 기
 Google Places API를 활용하여 현재 위치 기반 주변 음식점을 검색하고,  
 이미지 마커로 지도에 표시하며 가게 상세 정보(영업시간·평점·리뷰·사진)를 제공한다.
 
+### Tab N — 추후 확장
+기능 탭은 지속적으로 추가될 예정. 각 탭은 독립적인 기능 단위로 구성되며 현재 구조(Hilt DI, ViewModel, Compose)를 그대로 활용한다.
+
 ### 공통 기술 요소
 - USB AOA / TCP Socket 이중 통신, DataTransport 추상화 인터페이스 (Tab 1 전용)
 - 확장성을 고려한 모듈화 및 DI 설계 (Hilt)
@@ -180,9 +183,7 @@ class TcpTransport(
 
 ---
 
-## 7. 송신 패킷 프로토콜
-
-## 6. 패킷 프로토콜 (초안)
+## 7. 패킷 프로토콜
 
 
 ### 전송간 동작(Android App <-> Electron App)
@@ -345,7 +346,7 @@ jobs:
 
 > Google Maps SDK를 활용한 GPS 메타데이터 파싱 및 마커/클러스터 + 썸네일 표시 구현
 
-> Google Places API 연동을 통한 현재 위치 기반 음식점 검색 및 이미지 마커 표시 구현 (Phase 4)
+> Google Places API 연동을 통한 현재 위치 기반 음식점 검색 및 이미지 마커 표시 구현
 
 ## 13. 작업 히스토리
 
