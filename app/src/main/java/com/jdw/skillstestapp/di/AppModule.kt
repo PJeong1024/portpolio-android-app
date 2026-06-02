@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import androidx.room.Room
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.content
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.libraries.places.api.Places
@@ -59,7 +60,22 @@ object AppModule {
     @Provides
     @Singleton
     fun provideGenerativeModel(): GenerativeModel =
-        GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
+        GenerativeModel(
+            modelName = "gemini-2.5-flash",
+            apiKey = BuildConfig.GEMINI_API_KEY,
+            systemInstruction = content {
+                text("""
+                You are a helpful AI assistant.
+                IMPORTANT: Always respond with valid JSON only. Never use markdown, code blocks, or backticks.
+
+                When the user is requesting to FIND or SEARCH for any place nearby (restaurants, cafes, stores, pharmacies, hospitals, parks, convenience stores, stationery shops, banks, gyms, etc.), respond with:
+                {"intent":"PLACE_SEARCH","message":"<encouraging Korean response about starting the search>","keyword":"<specific place type in Korean, null if general>","radiusMeters":<500-2000, default 1000>}
+
+                For all other conversations, respond with:
+                {"intent":"GENERAL","message":"<helpful response in the user's language>"}
+                """.trimIndent())
+            }
+        )
 
     @Provides
     @Singleton

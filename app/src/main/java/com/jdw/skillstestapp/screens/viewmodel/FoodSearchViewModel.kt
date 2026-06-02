@@ -58,7 +58,7 @@ class FoodSearchViewModel @Inject constructor(
                     return@launch
                 }
                 _myLocation.value = location
-                placesRepository.searchNearbyRestaurants(location)
+                placesRepository.searchNearbyPlaces(location)
                     .onSuccess { places ->
                         _places.value = places
                         loadThumbnailsAsync(places)

@@ -1,7 +1,7 @@
 # Android 앱 명세
 
-> 최종 업데이트: 2026-06-01  
-> 원본 프로젝트: Google Maps + Places API 기반 포트폴리오 Android 앱
+> 최종 업데이트: 2026-06-02  
+> 원본 프로젝트: Google Maps + Places API + Gemini AI 기반 포트폴리오 Android 앱
 
 ---
 
@@ -22,6 +22,11 @@ Google Maps SDK와 Places API를 중심으로 두 가지 독립적인 지도 기
 ### Tab 2 — Food Search
 Google Places API를 활용하여 현재 위치 기반 주변 음식점을 검색하고,  
 이미지 마커로 지도에 표시하며 가게 상세 정보(영업시간·평점·리뷰·사진)를 제공한다.
+
+### Tab 3 — Gemini Chat
+Google Gemini AI SDK를 연동하여 일반 대화 응답과 장소 검색을 함께 제공하는 AI 챗봇 인터페이스.  
+Structured Output으로 사용자 발화 의도를 분류하고, 장소 검색 요청 시 Places API와 연동하여  
+결과를 SearchCard 카드 UI로 표시한다. 카드 클릭 시 Google Maps 앱으로 해당 위치를 표시한다.
 
 ### Tab N — 추후 확장
 기능 탭은 지속적으로 추가될 예정. 각 탭은 독립적인 기능 단위로 구성되며 현재 구조(Hilt DI, ViewModel, Compose)를 그대로 활용한다.
@@ -50,6 +55,16 @@ Google Places API를 활용하여 현재 위치 기반 주변 음식점을 검�
 5. 클러스터 클릭 → 바텀 시트 가게 목록 → 항목 선택 → 상세 정보
 6. FAB(↺) → 주변 검색 재실행
 
+### Tab 3 — Gemini Chat
+1. 탭 진입 → 챗 인터페이스 표시 (메시지 목록 + 입력창 + 전송 버튼)
+2. 일반 질문 입력 → Gemini API 호출 → 텍스트 버블 표시 → 하단 자동 스크롤
+3. 장소 검색 발화 ("근처 맛집 찾아줘", "약국 어딨어?" 등)
+   → Gemini Structured Output으로 의도 분류 (PLACE_SEARCH 감지)
+   → 현재 위치 획득 → Places API 검색 (키워드 기반 타입 매핑)
+   → 결과를 SearchCard 카드 리스트로 표시 (LazyRow 수평 스크롤, 썸네일 비동기 로딩)
+4. 카드 클릭 → Google Maps 앱 실행 (해당 위치 표시)
+5. 텍스트 대화 히스토리 Room DB 저장 → 앱 재진입 시 복원
+
 ---
 
 ## 3. 시스템 구조
@@ -72,10 +87,29 @@ Google Places API를 활용하여 현재 위치 기반 주변 음식점을 검�
 ```
 [Android 앱]
   위치 권한 확인 → FusedLocationProvider → 현재 GPS 좌표
-  → PlacesRepository.searchNearbyRestaurants() → Place 목록 수신
+  → PlacesRepository.searchNearbyPlaces() → Place 목록 수신
   → 기본 마커 표시 → fetchPlacePhoto() 병렬 로딩 → 이미지 마커 교체
   → 마커/클러스터 클릭 → BottomSheet 상세 정보 표시
      (영업 상태 / 평점 / 가격대 / 영업시간 / 사진 그리드 / 리뷰)
+```
+
+### Tab 3 — Gemini Chat
+```
+[Android 앱]
+  챗 UI → 사용자 메시지 입력
+  → GenerativeModel.generateContent() [systemInstruction: JSON 응답 강제]
+  → GeminiIntent JSON 파싱 (intent: PLACE_SEARCH | GENERAL)
+
+  [GENERAL]
+  → ChatMessage DB 저장 → 텍스트 버블 표시
+
+  [PLACE_SEARCH]
+  → FusedLocationProvider → 현재 위치
+  → PlacesRepository.searchNearbyPlaces(keyword, radius)
+  → Place[] → SearchCard[] 변환 (title/subtitle/badge/latLng)
+  → ChatItem.CardResult → CardResultRow 카드 UI (LazyRow)
+  → fetchPlacePhoto() 썸네일 비동기 로딩
+  → 카드 클릭 → Google Maps Intent (geo: URI)
 ```
 
 ---
@@ -103,7 +137,16 @@ MainActivity
 │           └── Googlemap 설정 → ConnectionSettingsScreen 전체화면
 │                   ├── TCP 카드: IP/Port 입력 + 연결/해제
 │                   └── USB 카드: 감지 시작/중지 + 상태 표시
-└── Tab N : 기타 기능 (Chat, Weather, Firebase Auth)
+├── Tab 3 : Gemini Chat ✅ 완료
+│           ├── 챗 인터페이스 (메시지 목록 LazyColumn + 입력창 + 전송 버튼)
+│           ├── 사용자/AI 메시지 버블 (정렬 + Material3 색상 + 삭제 기능)
+│           ├── Gemini AI SDK 연동 (gemini-2.5-flash, Structured Output JSON)
+│           ├── 의도 분류: PLACE_SEARCH → 장소 검색 / GENERAL → 일반 대화
+│           ├── 장소 검색: Places API → SearchCard 카드 UI (LazyRow 수평 스크롤)
+│           ├── 카드 클릭 → Google Maps 앱 실행 (geo: URI)
+│           ├── 타이핑 인디케이터 + 응답 오류 시 에러 메시지 표시
+│           └── Room DB 대화 히스토리 저장/복원
+└── Tab N : 기타 기능 (Weather, Firebase Auth 등) — 향후 추가 예정
 ```
 
 ---
@@ -130,19 +173,30 @@ app/
 ├── packet/
 │   ├── PacketBuilder.kt            # 패킷 프레이밍
 │   └── PacketParser.kt             # 스트리밍 파서
+├── data/model/
+│   ├── ChatMessage.kt              # Room Entity: Gemini 대화 메시지
+│   ├── ChatItem.kt                 # sealed: Message(ChatMessage) / CardResult(List<SearchCard>)
+│   ├── SearchCard.kt               # 공용 카드 모델 (title/subtitle/badge/latLng/actionUrl)
+│   └── GeminiIntent.kt             # Gemini JSON 응답 파싱용 (intent/message/keyword/radiusMeters)
 ├── repository/
-│   ├── GoogleMapsRepository.kt     # 이미지 로드
-│   └── PlacesRepository.kt         # Places API Nearby Search (searchNearbyRestaurants)
+│   ├── GoogleMapsRepository.kt     # 이미지 로드 (loadThumbnailBytes / loadRawImageBytes)
+│   ├── PlacesRepository.kt         # Places API (searchNearbyPlaces + fetchPlacePhoto)
+│   │                                 # keywordToPlaceTypes(): 한국어 키워드 → Places 타입 매핑 20+종
+│   └── ChatRepository.kt           # Room 메시지 CRUD (getAllMessage / insertMessage / deleteMessage)
 ├── di/
 │   ├── AppScope.kt                 # @ApplicationScope qualifier
-│   └── AppModule.kt                # Hilt 모듈 (PlacesClient + FusedLocationClient 포함)
+│   └── AppModule.kt                # Hilt 모듈
+│                                     # GenerativeModel: gemini-2.5-flash + systemInstruction(JSON 강제)
+│                                     # PlacesClient, FusedLocationProviderClient 포함
 └── screens/
     ├── GoogleMapsScreen.kt          # Tab 1: Google Maps Marker
     ├── FoodSearchScreen.kt          # Tab 2: Food Search (지도 + 클러스터 + 바텀시트 + 이미지 그리드 + 리뷰)
+    ├── GeminiChatRoomScreen.kt      # Tab 3: 챗 버블 + CardResultRow(공용 카드 UI) + 타이핑 인디케이터
     ├── ConnectionSettingsScreen.kt  # 연결 설정 UI (TCP/USB)
     └── viewmodel/
         ├── GoogleMapScreenViewModel.kt    # 마커 전송, CMD 0x02/0x03/0x04 처리
         ├── FoodSearchViewModel.kt         # 위치 획득 + Nearby Search + 사진 비동기 로딩
+        ├── GeminiChatRoomViewModel.kt     # Gemini 의도 분류 + 장소 검색 + ChatItem 상태 관리
         └── ConnectionSettingsViewModel.kt  # TCP/USB 연결 상태 관리
 ```
 
@@ -241,6 +295,96 @@ data class UserImg(
 
 ---
 
+## 8. Gemini Chat 구조 (Tab 3)
+
+### Structured Output 의도 분류 흐름
+
+```
+사용자 발화
+  → GenerativeModel.generateContent() [systemInstruction 적용]
+  → 응답 JSON 파싱: GeminiIntent { intent, message, keyword, radiusMeters }
+  → intent == "PLACE_SEARCH"  → handlePlaceSearch()
+  → intent == "GENERAL"       → 텍스트 버블 저장·표시
+```
+
+### ChatItem sealed class
+
+```kotlin
+sealed class ChatItem {
+    data class Message(val chatMessage: ChatMessage) : ChatItem()
+    data class CardResult(
+        val id: Long,
+        val query: String,
+        val cards: List<SearchCard>   // 공용 — 장소/날씨/상품 등 모든 카드 타입 수용
+    ) : ChatItem()
+}
+```
+
+### SearchCard 공용 카드 모델
+
+```kotlin
+data class SearchCard(
+    val id: String,
+    val title: String,
+    val subtitle: String?,   // 주소, 설명 등
+    val badge: String?,      // 평점, 가격대, 거리 등 한 줄 요약
+    val thumbnail: Bitmap?,
+    val latLng: LatLng?,     // 있으면 → Google Maps Intent
+    val actionUrl: String?   // 있으면 → 브라우저/딥링크
+)
+```
+
+### 카드 클릭 액션 우선순위
+
+| 조건 | 동작 |
+|------|------|
+| `latLng != null` | `geo:lat,lng?q=lat,lng(name)` → Google Maps 앱 |
+| `actionUrl != null` | `Intent(ACTION_VIEW, Uri.parse(actionUrl))` → 브라우저 |
+| 둘 다 null | no-op |
+
+### 새 검색 타입 추가 패턴
+
+```
+1. AppModule systemInstruction에 새 intent 케이스 1줄 추가
+2. GeminiChatRoomViewModel에 handleXxxSearch() 추가
+   → 결과를 SearchCard 리스트로 변환 후 ChatItem.CardResult로 appendItem
+3. sendAndReceiveMessage() when 분기에 케이스 추가
+4. CardResultRow / SearchCardItem UI — 수정 불필요 (SearchCard 공용)
+```
+
+### 장소 타입 매핑 (PlacesRepository.keywordToPlaceTypes)
+
+| 키워드 | Places API 타입 |
+|--------|----------------|
+| 일식/스시/라멘 | japanese_restaurant |
+| 한식 | korean_restaurant |
+| 중식 | chinese_restaurant |
+| 이탈리안/파스타/피자 | italian_restaurant |
+| 카페/커피 | cafe |
+| 버거/패스트푸드 | fast_food_restaurant |
+| 베이커리/빵집 | bakery |
+| 식당/레스토랑/맛집 | restaurant |
+| 문구 | stationery |
+| 약국 | pharmacy |
+| 편의점 | convenience_store |
+| 마트/슈퍼 | supermarket |
+| 서점/책방 | book_store |
+| 꽃집 | florist |
+| 세탁 | laundry |
+| 미용실/헤어 | hair_care |
+| 병원 | hospital |
+| 은행 | bank |
+| 주유소 | gas_station |
+| 헬스/헬스장 | gym |
+| 영화관 | movie_theater |
+| 도서관 | library |
+| 공원 | park |
+| 호텔 | lodging |
+| 학교 | school |
+| 미매핑 | null → 타입 필터 없이 검색 |
+
+---
+
 ## 9. 개발 Phase (Android 파트)
 
 ### Phase 1~3 — GPS Marker Image Viewer + 통신 연동 ✅ 완료
@@ -290,6 +434,37 @@ data class UserImg(
 - [x] 탭 공식 명칭 확정: Tab 1 = "Google Maps Marker", Tab 2 = "Food Search"
 - [x] BottomNaviBarScreen.GoogleMaps label 변경 ("Google Maps" → "Google Maps Marker")
 - [x] CLAUDE.md 문서 전면 업데이트 (앱 개요/시나리오/시스템 구조/탭 구성 재작성)
+
+### Phase 5 — Gemini Chat (Android Tab 3) ✅ 완료
+
+- [x] 기존 GeminiChatRoomViewModel / ChatRepository / GeminiChatRoomScreen 현황 파악
+- [x] Google AI SDK (generative-ai 0.9.0) 의존성 확인 + 모델 업그레이드
+  - gemini-1.5-flash → gemini-2.0-flash → gemini-2.5-flash (deprecated 순차 대응)
+- [x] Gemini API 키 local.properties 등록 확인 (`GEMINI_API_KEY=`)
+- [x] GeminiChatRoomScreen UI 전면 개선
+  - [x] 입력창 가변 높이 (maxLines=5, pill 형태)
+  - [x] 전송 버튼 원형 IconButton (활성/비활성 색상 전환)
+  - [x] 메시지 버블 Material3 색상 + 카카오톡 스타일 모서리
+  - [x] Gemini 메시지 SmartToy 아바타 아이콘
+  - [x] 타이핑 인디케이터 (응답 대기 중 버블형 로딩)
+  - [x] 메시지 삭제 버튼 — DB 삭제 + UI 즉시 반영
+- [x] 예외 처리: try-catch-finally, 에러 메시지 채팅 UI 표시 (앱 크래시 방지)
+- [x] Structured Output 기반 의도 분류 구현
+  - [x] systemInstruction으로 Gemini JSON 응답 강제 (PLACE_SEARCH / GENERAL)
+  - [x] GeminiIntent 파싱 (마크다운 코드블록 자동 제거 포함)
+  - [x] PLACE_SEARCH → FusedLocation + PlacesRepository.searchNearbyPlaces()
+  - [x] Place → SearchCard 변환 (title/subtitle/badge/latLng)
+  - [x] ChatItem.CardResult → CardResultRow 카드 UI (LazyRow 수평 스크롤)
+  - [x] 카드 썸네일 비동기 로딩 + updateThumbnail 반영
+  - [x] 장소 타입 매핑 25종 (음식/쇼핑/생활/시설/서비스)
+  - [x] 카드 클릭 → Google Maps geo: URI Intent
+- [x] SearchCard 공용 카드 모델 리팩토링 (PlaceCard → SearchCard)
+  - [x] ChatItem.PlaceResult → ChatItem.CardResult
+  - [x] CardResultRow / SearchCardItem (타입 무관 공용 렌더링)
+  - [x] 클릭 액션: latLng→Maps / actionUrl→브라우저 / 없으면 no-op
+- [x] Room DB 대화 히스토리 저장/복원
+- [x] LazyColumn key 중복 버그 수정 (`id=0` → `timestamp_sender` 기반 키)
+- [x] 실기기 동작 검증 완료 (일반 대화 + 장소 검색 + 카드 클릭)
 
 ---
 
@@ -348,12 +523,169 @@ jobs:
 
 > Google Places API 연동을 통한 현재 위치 기반 음식점 검색 및 이미지 마커 표시 구현
 
+> Google Gemini AI SDK Structured Output을 활용한 자연어 의도 분류 및 Places API 연동 구현 — 사용자 발화에서 장소 검색 의도를 JSON으로 추출하고, SearchCard 공용 카드 모델로 결과를 채팅 UI 내 표시
+
+> 확장 가능한 AI 챗봇 아키텍처 설계 — SearchCard / ChatItem.CardResult 공용 구조로 새 검색 타입 추가 시 카드 UI 재사용 가능
+
 ## 13. 작업 히스토리
 
 ### 사전 전제사항 
 - 수행한 작업들은 작업의 경중을 떠나서 모든 작업들이 해당 항목에 기록이 저장되어야한다. 
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
+
+### 2026-06-02 — SearchCard 공용 카드 모델 리팩토링 (Claude Code)
+
+#### 배경
+향후 새 검색 타입(날씨, 상품, 뉴스 등) 추가 시 재사용 가능하도록 `PlaceCard` → `SearchCard` 공용 추상화.
+
+#### 변경 내용
+
+- **`data/model/SearchCard.kt`** — 신규 공용 카드 모델
+  - `id`, `title`, `subtitle`, `badge`, `thumbnail`, `latLng`, `actionUrl`
+  - `latLng` 있으면 Google Maps, `actionUrl` 있으면 브라우저, 둘 다 없으면 no-op
+
+- **`data/model/PlaceCard.kt`** — 내용 비움 (SearchCard로 대체)
+
+- **`data/model/ChatItem.kt`** — `PlaceResult` → `CardResult(query, cards: List<SearchCard>)`
+
+- **`screens/viewmodel/GeminiChatRoomViewModel.kt`**
+  - `Place → SearchCard` 변환 로직 (`title=name`, `subtitle=address`, `badge=rating`, `latLng`)
+  - `appendErrorMsg()` 공용 헬퍼 추출
+  - `updateThumbnail()` — `SearchCard.copy(thumbnail=...)` 방식
+
+- **`screens/GeminiChatRoomScreen.kt`**
+  - `CardResultRow` / `SearchCardItem` — 타입 무관하게 동작하는 공용 카드 UI
+  - `onCardClick()` — `latLng` 있으면 Maps, `actionUrl` 있으면 브라우저
+  - 플레이스홀더 아이콘 `Restaurant` → `Place` (장소 중립)
+
+#### 새 검색 타입 추가 패턴 (향후 참고)
+```
+1. GeminiIntent system prompt에 새 intent 케이스 추가
+2. ViewModel에 handleXxxSearch() 추가 → 결과를 SearchCard 리스트로 변환
+3. when(intent.intent) 분기에 케이스 추가
+4. 카드 UI / CardResultRow는 수정 불필요 (SearchCard 공용)
+```
+
+---
+
+### 2026-06-02 — 일반 장소 검색 확장 + 모델 파일명 정리 (Claude Code)
+
+#### 변경 내용
+
+- **`data/model/PlaceCard.kt`** — 신규 생성 (`RestaurantCard` → `PlaceCard` 리네임)
+- **`data/model/RestaurantCard.kt`** — 내용 비움 (PlaceCard.kt로 이전)
+- **`data/model/ChatItem.kt`** — `RestaurantResult` → `PlaceResult`
+- **`di/AppModule.kt`** — systemInstruction 확장: 레스토랑에서 모든 장소 검색으로 범위 확대, `RESTAURANT_SEARCH` → `PLACE_SEARCH`
+- **`repository/PlacesRepository.kt`** — `searchNearbyRestaurants` → `searchNearbyPlaces`
+  - `keywordToPlaceTypes()` 반환타입 `List<String>` → `List<String>?` (미매핑 시 null → 타입 필터 없이 검색)
+  - 타입 매핑 대폭 확장: 문구 → stationery, 약국 → pharmacy, 편의점 → convenience_store, 마트 → supermarket, 서점 → book_store, 꽃집 → florist, 세탁 → laundry, 미용실 → hair_care, 병원 → hospital, 은행 → bank, 주유소 → gas_station, 헬스장 → gym, 영화관 → movie_theater, 도서관 → library, 공원 → park, 호텔 → lodging, 학교 → school
+- **`screens/viewmodel/FoodSearchViewModel.kt`** — `searchNearbyRestaurants` → `searchNearbyPlaces`
+- **`screens/viewmodel/GeminiChatRoomViewModel.kt`** — 전체 rename 반영 (`PlaceCard`, `PlaceResult`, `handlePlaceSearch`, `PLACE_SEARCH`)
+- **`screens/GeminiChatRoomScreen.kt`** — 전체 rename 반영 (`PlaceCard`, `PlaceResult`, `PlaceResultRow`)
+
+---
+
+### 2026-06-02 — Gemini Structured Output + 레스토랑 카드 UI 구현 (Claude Code)
+
+#### 배경
+사용자 발화 기반으로 Gemini가 RESTAURANT_SEARCH / GENERAL 의도를 판단(Structured Output → JSON),
+RESTAURANT_SEARCH 시 Places API 검색 → 채팅 UI 내 카드 형태로 결과 표시 → 카드 클릭 → Google Maps 연동.
+
+#### 신규 파일
+
+- **`data/model/GeminiIntent.kt`** — Gemini JSON 응답 파싱용 data class (`intent`, `message`, `keyword`, `radiusMeters`)
+- **`data/model/RestaurantCard.kt`** — 레스토랑 카드 데이터 (`placeId`, `name`, `address`, `rating`, `latLng`, `thumbnail`)
+- **`data/model/ChatItem.kt`** — 채팅 아이템 sealed class
+  - `Message(chatMessage)` — 텍스트 버블
+  - `RestaurantResult(id, query, cards)` — 카드 리스트 (세션 내 인메모리)
+
+#### 수정 파일
+
+- **`di/AppModule.kt`** — `GenerativeModel`에 `systemInstruction` 추가
+  - Gemini가 항상 JSON으로만 응답하도록 지시
+  - 레스토랑 검색 요청 시 `{"intent":"RESTAURANT_SEARCH","message":"...","keyword":"...","radiusMeters":...}` 반환
+  - 일반 대화 시 `{"intent":"GENERAL","message":"..."}` 반환
+
+- **`repository/PlacesRepository.kt`** — `searchNearbyRestaurants`에 `keyword: String?` 파라미터 추가
+  - `keywordToPlaceTypes()`: 키워드 → Places API includedTypes 매핑
+    (일식→japanese_restaurant, 한식→korean_restaurant, 중식→chinese_restaurant, 이탈리안→italian_restaurant, 카페→cafe 등)
+  - 기존 `FoodSearchViewModel` 호출에는 영향 없음 (default null)
+
+- **`screens/viewmodel/GeminiChatRoomViewModel.kt`** — 전면 재작성
+  - `PlacesRepository`, `FusedLocationProviderClient` 추가 주입
+  - `_chatItems: MutableStateFlow<List<ChatItem>>` — 텍스트 + 카드 통합 상태
+  - `parseIntent()`: Gemini 응답 JSON 파싱 (마크다운 코드블록 자동 제거)
+  - `handleRestaurantSearch()`: 위치 획득 → Places 검색 → 카드 표시 → 썸네일 비동기 로딩
+  - `updateCardThumbnail()`: 썸네일 로드 완료 시 해당 카드만 업데이트
+  - `deleteMessage()`: DB 삭제 + `_chatItems`에서 즉시 제거
+
+- **`screens/GeminiChatRoomScreen.kt`** — `chatItems` 기반으로 전환 + 카드 UI 추가
+  - `RestaurantResultRow`: 쿼리 헤더 + 가로 스크롤 `LazyRow` 카드 리스트
+  - `RestaurantCardItem`: 썸네일(90dp) + 이름 + 별점 + 주소 2줄 (150dp 고정폭 Card)
+  - 카드 클릭 → `openGoogleMaps()`: `geo:lat,lng?q=name` Intent → Google Maps 앱 실행
+  - `LazyColumn.key` 타입별 분기 (`msg_id` / `rest_id`)
+
+#### 동작 흐름
+```
+사용자: "근처 스시 맛집 찾아줘"
+  → Gemini: {"intent":"RESTAURANT_SEARCH","message":"주변 스시 레스토랑 찾아볼게요!","keyword":"스시","radiusMeters":1000}
+  → handleRestaurantSearch()
+    → 위치 획득 → searchNearbyRestaurants(keyword="스시") → japanese_restaurant 타입 검색
+    → 결과 카드 (썸네일 없이) 즉시 표시
+    → 각 가게 fetchPlacePhoto() 비동기 → 썸네일 순차 업데이트
+  → 카드 클릭 → Google Maps 앱에서 해당 위치 표시
+```
+
+#### Tab 2 연동 (추후 작업 예정)
+- 카드 클릭 → Tab 2로 이동 + 해당 마커 표시 (현재는 Google Maps 직접 연동으로 우선 구현)
+
+---
+
+### 2026-06-02 — Gemini Chat UI 개선 + 삭제 기능 연동 (Claude Code)
+
+#### 변경 내용
+
+- **`screens/GeminiChatRoomScreen.kt`** — 전면 재작성
+  - 입력창: `maxLines = 1` → `maxLines = 5` + 고정 height Row 제거 → 텍스트 길이에 따라 자동 확장
+  - 입력창 shape: border → pill형 `RoundedCornerShape(24dp)` + underline 제거 (`TextFieldDefaults.colors` indicator 투명)
+  - 전송 버튼: `Button("Send")` → 원형 `IconButton(Send 아이콘)`, 전송 가능 여부에 따라 배경색 변경
+  - 메시지 버블: `widthIn(max = 240.dp)` 적용 → 긴 텍스트도 삭제 버튼 항상 표시
+  - 삭제 버튼 위치: 유저 메시지는 버블 왼쪽, Gemini 메시지는 버블 오른쪽
+  - 삭제 버튼 `onDelete` 콜백 연결 (기존 빈 clickable → `viewModel.deleteMessage()` 호출)
+  - 버블 색상: 하드코딩 `Color.Cyan/LightGray` → `MaterialTheme.colorScheme.primary/surfaceVariant`
+  - 버블 shape: 카카오톡 스타일 (발신 방향 모서리만 4dp, 나머지 16dp)
+  - Gemini 메시지에 `SmartToy` 아바타 아이콘 추가 (32dp 원형 배경)
+  - 로딩 중 `TypingIndicator` 추가 (아바타 + 버블 내 CircularProgressIndicator)
+  - 타임스탬프 색상: 반투명 `onSurfaceVariant`
+  - `LazyColumn` → `key = { it.id }` 적용으로 삭제 시 애니메이션 정확도 향상
+
+- **`screens/viewmodel/GeminiChatRoomViewModel.kt`** — `deleteMessage()` DB 삭제 후 UI 갱신 추가
+  - 기존: 삭제만 하고 `_chatMessage` 미갱신 → 화면에 삭제 반영 안 됨
+  - 수정: 삭제 후 `_chatMessage.value = chatRepository.getAllMessage()` 추가
+
+---
+
+### 2026-06-02 — Gemini SDK 업데이트 + 크래시 수정 (Claude Code)
+
+#### 배경
+`gemini-1.5-flash` 모델 deprecated + SDK 0.7.0 노후화로 메시지 전송 시 앱 크래시 발생.
+
+#### 수정 내용
+
+- **`gradle/libs.versions.toml`** — `generativeai` 버전 업
+  - `"0.7.0"` → `"0.9.0"`
+- **`di/AppModule.kt`** — 모델명 교체
+  - `"gemini-1.5-flash"` → `"gemini-2.5-flash"` (gemini-2.0-flash도 retired 확인 → 2.5로 최종 변경)
+- **`screens/viewmodel/GeminiChatRoomViewModel.kt`** — 예외 처리 추가
+  - `sendAndReceiveMessage()` 내 `generateContent()` 호출을 try-catch-finally로 래핑
+  - API 에러 시 앱 크래시 대신 에러 메시지를 채팅 UI에 표시
+  - `_isLoading = false` + DB 갱신을 finally 블록으로 이동 (에러 시에도 로딩 상태 정상 복귀)
+- **`screens/GeminiChatRoomScreen.kt`** — 전송 버튼 조건 버그 수정
+  - `enabled = sendMessage.isNotEmpty() || !isLoading` → `&&` (AND)
+  - 기존: 로딩 중에도 전송 버튼 활성화됨 → 수정: 메시지 있고 로딩 아닐 때만 활성화
+
+---
 
 ### 2026-06-01 — 문서 전면 개편 + 탭 명칭 확정 (Claude Code)
 
