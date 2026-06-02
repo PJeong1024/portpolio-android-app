@@ -354,33 +354,35 @@ data class SearchCard(
 
 ### 장소 타입 매핑 (PlacesRepository.keywordToPlaceTypes)
 
-| 키워드 | Places API 타입 |
-|--------|----------------|
-| 일식/스시/라멘 | japanese_restaurant |
-| 한식 | korean_restaurant |
-| 중식 | chinese_restaurant |
-| 이탈리안/파스타/피자 | italian_restaurant |
-| 카페/커피 | cafe |
-| 버거/패스트푸드 | fast_food_restaurant |
-| 베이커리/빵집 | bakery |
-| 식당/레스토랑/맛집 | restaurant |
-| 문구 | stationery |
-| 약국 | pharmacy |
-| 편의점 | convenience_store |
-| 마트/슈퍼 | supermarket |
-| 서점/책방 | book_store |
-| 꽃집 | florist |
-| 세탁 | laundry |
-| 미용실/헤어 | hair_care |
-| 병원 | hospital |
-| 은행 | bank |
-| 주유소 | gas_station |
-| 헬스/헬스장 | gym |
-| 영화관 | movie_theater |
-| 도서관 | library |
-| 공원 | park |
-| 호텔 | lodging |
-| 학교 | school |
+> Gemini가 영문 소문자로 keyword를 반환 (`systemInstruction`에 명시) → 영문 매핑으로 일관성 확보
+
+| Gemini keyword (영문) | Places API 타입 |
+|----------------------|----------------|
+| sushi / japanese | japanese_restaurant |
+| korean | korean_restaurant |
+| chinese | chinese_restaurant |
+| italian / pasta / pizza | italian_restaurant |
+| cafe / coffee | cafe |
+| burger / fast food | fast_food_restaurant |
+| bakery / bread | bakery |
+| restaurant / food / dining | restaurant |
+| stationery | stationery |
+| pharmacy / drugstore | pharmacy |
+| convenience | convenience_store |
+| supermarket / grocery | supermarket |
+| bookstore / book store | book_store |
+| florist / flower | florist |
+| laundry | laundry |
+| hair / salon / barber | hair_care |
+| hospital / clinic | hospital |
+| bank | bank |
+| gas station / fuel | gas_station |
+| gym / fitness | gym |
+| movie / cinema / theater | movie_theater |
+| library | library |
+| park | park |
+| hotel / lodging | lodging |
+| school | school |
 | 미매핑 | null → 타입 필터 없이 검색 |
 
 ---
@@ -533,6 +535,19 @@ jobs:
 - 수행한 작업들은 작업의 경중을 떠나서 모든 작업들이 해당 항목에 기록이 저장되어야한다. 
 - 이를 통하여 작업의 진행상황과 진행여부 그리고 향후 진행계획 까지 파악 및 수립이 가능하다.
 - 신규 구현/수정/삭제등 의 코드작업이 진행되는간에 반드시 모든 작업들은 히스토리 기록이 자동으로 이루어져야한다. 
+
+### 2026-06-02 — Tab 2 식당 검색 복구 (Claude Code)
+
+#### 배경
+`searchNearbyRestaurants` → `searchNearbyPlaces` 리네임 과정에서 `FoodSearchViewModel`의 호출에 `keyword` 미전달 → `keywordToPlaceTypes(null) = null` → 타입 필터 없이 전체 장소 검색으로 동작하는 회귀 발생.
+
+#### 수정 내용
+
+- **`screens/viewmodel/FoodSearchViewModel.kt`**
+  - `searchNearbyPlaces(location)` → `searchNearbyPlaces(location, keyword = "식당")`
+  - `"식당"` → `keywordToPlaceTypes` 매핑 → `listOf("restaurant")` → 기존 식당만 검색 동작 복구
+
+---
 
 ### 2026-06-02 — SearchCard 공용 카드 모델 리팩토링 (Claude Code)
 

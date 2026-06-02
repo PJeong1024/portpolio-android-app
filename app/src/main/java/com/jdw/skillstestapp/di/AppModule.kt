@@ -69,7 +69,7 @@ object AppModule {
                 IMPORTANT: Always respond with valid JSON only. Never use markdown, code blocks, or backticks.
 
                 When the user is requesting to FIND or SEARCH for any place nearby (restaurants, cafes, stores, pharmacies, hospitals, parks, convenience stores, stationery shops, banks, gyms, etc.), respond with:
-                {"intent":"PLACE_SEARCH","message":"<encouraging Korean response about starting the search>","keyword":"<specific place type in Korean, null if general>","radiusMeters":<500-2000, default 1000>}
+                {"intent":"PLACE_SEARCH","message":"<encouraging Korean response about starting the search>","keyword":"<specific place type in English lowercase (e.g. sushi, pharmacy, cafe, gym), null if general>","radiusMeters":<500-2000, default 1000>}
 
                 For all other conversations, respond with:
                 {"intent":"GENERAL","message":"<helpful response in the user's language>"}
